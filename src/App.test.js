@@ -1,8 +1,11 @@
 import { render, screen } from '@testing-library/react';
 import App from './App';
 
-test('renders learn react link', () => {
+test('renders weather app', () => {
   render(<App />);
-  const linkElement = screen.getByText(/learn react/i);
-  expect(linkElement).toBeInTheDocument();
+
+  // Check for main elements that should always be present
+  expect(screen.getByText(/Paris, FR/i)).toBeInTheDocument();
+  expect(screen.getByText("Today's Weather")).toBeInTheDocument();
+  expect(screen.getByText('Next 5 Days')).toBeInTheDocument();
 });
