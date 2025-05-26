@@ -4,7 +4,6 @@ import { Sunrise, Sunset, Eye, Droplets } from 'lucide-react';
 const WeatherStats = ({ weatherData }) => {
     return (
         <div className="space-y-4">
-            {/* Sun Times */}
             <div className="bg-white/10 backdrop-blur-md rounded-2xl p-6 text-white">
                 <h3 className="text-lg font-medium mb-4">Sun Times</h3>
                 <div className="space-y-3">
@@ -25,7 +24,6 @@ const WeatherStats = ({ weatherData }) => {
                 </div>
             </div>
 
-            {/* Additional Stats */}
             <div className="bg-white/10 backdrop-blur-md rounded-2xl p-6 text-white">
                 <h3 className="text-lg font-medium mb-4">Details</h3>
                 <div className="space-y-3 text-sm">

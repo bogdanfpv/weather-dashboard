@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { Sun, Cloud, CloudRain, CloudSnow, Wind, Eye, Droplets, Thermometer, Sunrise, Sunset } from 'lucide-react';
 import WeatherStats from './WeatherStats';
 import WeatherIcon from './WeatherIcon';
@@ -55,20 +55,12 @@ const WeatherApp = () => {
         return () => clearInterval(timer);
     }, []); // Empty dependency array means the interval is only set once when the component mounts
 
-    const [wakeLock, setWakeLock] = useState(null);
+    const wakeLockRef = useRef(null);
 
     useEffect(() => {
         const requestWakeLock = async () => {
             try {
-                const lock = await navigator.wakeLock.request('screen');
-                setWakeLock(lock);
-
-                // Release wake lock if page loses visibility
-                document.addEventListener('visibilitychange', () => {
-                    if (document.visibilityState === 'visible' && !wakeLock) {
-                        requestWakeLock();
-                    }
-                });
+                wakeLockRef.current = await navigator.wakeLock.request('screen');
             } catch (err) {
                 console.log('Wake Lock error:', err.message);
             }
@@ -76,12 +68,17 @@ const WeatherApp = () => {
 
         if ('wakeLock' in navigator) {
             requestWakeLock();
+
+            document.addEventListener('visibilitychange', () => {
+                if (document.visibilityState === 'visible' && !wakeLockRef.current) {
+                    requestWakeLock();
+                }
+            });
         }
 
-        // Cleanup
         return () => {
-            if (wakeLock) {
-                wakeLock.release();
+            if (wakeLockRef.current) {
+                wakeLockRef.current.release();
             }
         };
     }, []);
@@ -103,7 +100,7 @@ const WeatherApp = () => {
 
                     {/* Current Temperature - Takes full width on mobile, 2 cols on desktop */}
                     <div className="lg:col-span-2">
-                        <div className="bg-white/10 backdrop-blur-md rounded-3xl p-8 text-center text-white">
+                        <div className="bg-white/10 backdrop-blur-md rounded-3xl p-8 text-center text-white h-full">
                             <div className="flex items-center justify-center mb-4">
                                 <WeatherIcon condition="clear" size="w-20 h-20 md:w-24 md:w-24" />
                             </div>
