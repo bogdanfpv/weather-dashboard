@@ -1,6 +1,7 @@
 import React from 'react';
 import { render, screen } from '@testing-library/react';
 import WeatherApp from './WeatherApp';
+import { act } from '@testing-library/react';
 
 describe('WeatherApp', () => {
     test('renders weather app with main components', () => {
@@ -19,6 +20,12 @@ describe('WeatherApp', () => {
         expect(screen.getByText('Next 5 Days')).toBeInTheDocument();
     });
 
+    test('displays the current time on mount', () => {
+        render(<WeatherApp />);
+        const timeText = screen.getByText(/Paris/);
+        expect(timeText).toHaveTextContent(/•\s*\d{1,2}:\d{2}\s*(AM|PM)/);
+    });
+
     test('displays current weather stats', () => {
         render(<WeatherApp />);
 
@@ -33,6 +40,25 @@ describe('WeatherApp', () => {
         expect(screen.getAllByText('14°').length).toBeGreaterThan(0);
         expect(screen.getAllByText('7mph').length).toBeGreaterThan(0);
         expect(screen.getAllByText('0%').length).toBeGreaterThan(0);
+    });
+
+    test('updates the time every 60 seconds', () => {
+        jest.useFakeTimers();
+        jest.setSystemTime(new Date('2025-01-01T12:00:00'));
+
+        render(<WeatherApp />);
+        const timeText = screen.getByText(/Paris/);
+        expect(timeText).toHaveTextContent('12:00');
+
+        // Advance time
+        act(() => {
+            jest.advanceTimersByTime(60000);
+        });
+
+        // Re-query since the DOM may have updated
+        expect(screen.getByText(/Paris/)).toHaveTextContent('12:01');
+
+        jest.useRealTimers();
     });
 
     test('shows 5-day forecast data', () => {

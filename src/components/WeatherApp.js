@@ -48,7 +48,7 @@ const WeatherApp = () => {
 
         // Update time every 60 seconds
         const timer = setInterval(() => {
-            setCurrentTime(new Date().toLocaleTimeString());
+            setCurrentTime(new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }));
         }, 60000);
 
         // Cleanup interval on unmount
