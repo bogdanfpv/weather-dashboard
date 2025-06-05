@@ -2,6 +2,10 @@ import React, { useState, useEffect, useRef } from 'react';
 import { Sun, Cloud, CloudRain, CloudSnow, Wind, Eye, Droplets, Thermometer, Sunrise, Sunset } from 'lucide-react';
 import WeatherStats from './WeatherStats';
 import WeatherIcon from './WeatherIcon';
+import { Bell, X } from 'lucide-react';
+import { useWebSocket } from '../hooks/useWebSocket';
+
+const WEBSOCKET_URL = 'wss://48ezwnk9x6.execute-api.eu-north-1.amazonaws.com/Prod';
 
 const WeatherApp = () => {
     // Mock weather data - in production this would come from your API
@@ -41,6 +45,9 @@ const WeatherApp = () => {
     });
 
     const [currentTime, setCurrentTime] = useState(new Date().toLocaleTimeString());
+
+    // Inside your WeatherApp component, add this after your existing useState calls:
+    const { isConnected, notifications, clearNotifications } = useWebSocket(WEBSOCKET_URL);
 
     useEffect(() => {
         // Set time immediately when component mounts
@@ -83,15 +90,60 @@ const WeatherApp = () => {
         };
     }, []);
 
+    const NotificationPanel = () => {
+        if (notifications.length === 0) return null;
+
+        return (
+            <div className="fixed top-4 right-4 z-50 space-y-2 max-w-sm">
+                {notifications.slice(0, 3).map((notification, idx) => (
+                    <div
+                        key={`${notification.timestamp}-${idx}`}
+                        className="bg-white/90 backdrop-blur-md rounded-lg p-4 shadow-lg border border-white/20 animate-slide-in"
+                    >
+                        <div className="flex items-start justify-between">
+                            <div className="flex items-start space-x-3">
+                                <Bell className="w-5 h-5 text-blue-600 mt-0.5 flex-shrink-0" />
+                                <div>
+                                    <p className="text-sm font-medium text-gray-800">
+                                        {notification.type === 'weather_alert' ? 'Weather Alert' : 'Notification'}
+                                    </p>
+                                    <p className="text-sm text-gray-600 mt-1">
+                                        {notification.message}
+                                    </p>
+                                    {notification.timestamp && (
+                                        <p className="text-xs text-gray-400 mt-1">
+                                            {new Date(notification.timestamp * 1000).toLocaleTimeString()}
+                                        </p>
+                                    )}
+                                </div>
+                            </div>
+                            <button
+                                onClick={clearNotifications}
+                                className="text-gray-400 hover:text-gray-600 transition-colors"
+                            >
+                                <X className="w-4 h-4" />
+                            </button>
+                        </div>
+                    </div>
+                ))}
+            </div>
+        );
+    };
+
     return (
         <div className="min-h-screen bg-gradient-to-b from-blue-500 via-blue-600 to-blue-800">
+            <NotificationPanel />
             <div className="container mx-auto px-4 py-6 max-w-6xl">
 
                 {/* Header */}
                 <header className="text-center mb-6">
-                    <h1 className="text-white text-2xl md:text-3xl font-light mb-2">
-                        {weatherData.location} • {currentTime}
-                    </h1>
+                    <div className="flex items-center justify-center space-x-2 mb-2">
+                        <h1 className="text-white text-2xl md:text-3xl font-light">
+                            {weatherData.location} • {currentTime}
+                        </h1>
+                        <div className={`w-2 h-2 rounded-full ${isConnected ? 'bg-green-400' : 'bg-red-400'}`}
+                             title={isConnected ? 'Live updates connected' : 'Live updates disconnected'} />
+                    </div>
                     <p className="text-blue-100 text-sm">{weatherData.date}</p>
                 </header>
 
