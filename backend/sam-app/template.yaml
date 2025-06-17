@@ -1,6 +1,12 @@
 AWSTemplateFormatVersion: '2010-09-09'
 Transform: AWS::Serverless-2016-10-31
 
+Parameters:
+  OpenWeatherMapApiKey:
+    Type: String
+    Description: OpenWeatherMap API key for weather data
+    NoEcho: true
+
 Globals:
   Function:
     Timeout: 30
@@ -41,21 +47,20 @@ Resources:
     Properties:
       CodeUri: connect/
       Handler: app.lambda_handler
-      Environment:
-        Variables:
-          WEBSOCKET_API_ENDPOINT: !Sub "${WeatherWebSocketApi}.execute-api.${AWS::Region}.amazonaws.com/Prod"
       Policies:
         - DynamoDBCrudPolicy:
             TableName: !Ref ConnectionsTable
+        - Statement:
+            - Effect: Allow
+              Action:
+                - execute-api:ManageConnections
+              Resource: !Sub "arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${WeatherWebSocketApi}/*"
 
   DisconnectFunction:
     Type: AWS::Serverless::Function
     Properties:
       CodeUri: disconnect/
       Handler: app.lambda_handler
-      Environment:
-        Variables:
-          WEBSOCKET_API_ENDPOINT: !Sub "${WeatherWebSocketApi}.execute-api.${AWS::Region}.amazonaws.com/Prod"
       Policies:
         - DynamoDBCrudPolicy:
             TableName: !Ref ConnectionsTable
@@ -67,7 +72,7 @@ Resources:
       Handler: app.lambda_handler
       Environment:
         Variables:
-          WEBSOCKET_API_ENDPOINT: !Sub "${WeatherWebSocketApi}.execute-api.${AWS::Region}.amazonaws.com/Prod"
+          OPENWEATHER_API_KEY: !Ref OpenWeatherMapApiKey
       Policies:
         - DynamoDBCrudPolicy:
             TableName: !Ref ConnectionsTable
@@ -95,82 +100,13 @@ Resources:
                 - execute-api:ManageConnections
               Resource: !Sub "arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${WeatherWebSocketApi}/*"
 
-  # Integrations
-  ConnectIntegration:
-    Type: AWS::ApiGatewayV2::Integration
-    Properties:
-      ApiId: !Ref WeatherWebSocketApi
-      IntegrationType: AWS_PROXY
-      IntegrationUri: !GetAtt ConnectFunction.Arn
-
-  DisconnectIntegration:
-    Type: AWS::ApiGatewayV2::Integration
-    Properties:
-      ApiId: !Ref WeatherWebSocketApi
-      IntegrationType: AWS_PROXY
-      IntegrationUri: !GetAtt DisconnectFunction.Arn
-
-  MessageIntegration:
-    Type: AWS::ApiGatewayV2::Integration
-    Properties:
-      ApiId: !Ref WeatherWebSocketApi
-      IntegrationType: AWS_PROXY
-      IntegrationUri: !GetAtt MessageFunction.Arn
-
-  # Routes
-  ConnectRoute:
-    Type: AWS::ApiGatewayV2::Route
-    Properties:
-      ApiId: !Ref WeatherWebSocketApi
-      RouteKey: $connect
-      AuthorizationType: NONE
-      Target: !Sub integrations/${ConnectIntegration}
-
-  DisconnectRoute:
-    Type: AWS::ApiGatewayV2::Route
-    Properties:
-      ApiId: !Ref WeatherWebSocketApi
-      RouteKey: $disconnect
-      AuthorizationType: NONE
-      Target: !Sub integrations/${DisconnectIntegration}
-
-  MessageRoute:
-    Type: AWS::ApiGatewayV2::Route
-    Properties:
-      ApiId: !Ref WeatherWebSocketApi
-      RouteKey: sendmessage
-      AuthorizationType: NONE
-      Target: !Sub integrations/${MessageIntegration}
-
-  # Permissions for API Gateway to invoke Lambdas
-  ConnectFunctionPermission:
-    Type: AWS::Lambda::Permission
-    Properties:
-      Action: lambda:InvokeFunction
-      FunctionName: !GetAtt ConnectFunction.Arn
-      Principal: apigateway.amazonaws.com
-
-  DisconnectFunctionPermission:
-    Type: AWS::Lambda::Permission
-    Properties:
-      Action: lambda:InvokeFunction
-      FunctionName: !GetAtt DisconnectFunction.Arn
-      Principal: apigateway.amazonaws.com
-
-  MessageFunctionPermission:
-    Type: AWS::Lambda::Permission
-    Properties:
-      Action: lambda:InvokeFunction
-      FunctionName: !GetAtt MessageFunction.Arn
-      Principal: apigateway.amazonaws.com
-
-  # Deployment and Stage
+  # Deployment and Stage (moved up before routes)
   WebSocketDeployment:
     Type: AWS::ApiGatewayV2::Deployment
     DependsOn:
       - ConnectRoute
       - DisconnectRoute
-      - MessageRoute
+      - DefaultRoute
     Properties:
       ApiId: !Ref WeatherWebSocketApi
 
@@ -180,6 +116,79 @@ Resources:
       ApiId: !Ref WeatherWebSocketApi
       DeploymentId: !Ref WebSocketDeployment
       StageName: Prod
+
+  # Integrations
+  ConnectIntegration:
+    Type: AWS::ApiGatewayV2::Integration
+    Properties:
+      ApiId: !Ref WeatherWebSocketApi
+      IntegrationType: AWS_PROXY
+      IntegrationUri: !Sub "arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${ConnectFunction.Arn}/invocations"
+
+  DisconnectIntegration:
+    Type: AWS::ApiGatewayV2::Integration
+    Properties:
+      ApiId: !Ref WeatherWebSocketApi
+      IntegrationType: AWS_PROXY
+      IntegrationUri: !Sub "arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${DisconnectFunction.Arn}/invocations"
+
+  MessageIntegration:
+    Type: AWS::ApiGatewayV2::Integration
+    Properties:
+      ApiId: !Ref WeatherWebSocketApi
+      IntegrationType: AWS_PROXY
+      IntegrationUri: !Sub "arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${MessageFunction.Arn}/invocations"
+
+  # Routes
+  ConnectRoute:
+    Type: AWS::ApiGatewayV2::Route
+    Properties:
+      ApiId: !Ref WeatherWebSocketApi
+      RouteKey: $connect
+      AuthorizationType: NONE
+      Target: !Sub "integrations/${ConnectIntegration}"
+
+  DisconnectRoute:
+    Type: AWS::ApiGatewayV2::Route
+    Properties:
+      ApiId: !Ref WeatherWebSocketApi
+      RouteKey: $disconnect
+      AuthorizationType: NONE
+      Target: !Sub "integrations/${DisconnectIntegration}"
+
+  # Default route handles all custom messages
+  DefaultRoute:
+    Type: AWS::ApiGatewayV2::Route
+    Properties:
+      ApiId: !Ref WeatherWebSocketApi
+      RouteKey: $default
+      AuthorizationType: NONE
+      Target: !Sub "integrations/${MessageIntegration}"
+
+  # Permissions for API Gateway to invoke Lambdas
+  ConnectFunctionPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      Action: lambda:InvokeFunction
+      FunctionName: !Ref ConnectFunction
+      Principal: apigateway.amazonaws.com
+      SourceArn: !Sub "arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${WeatherWebSocketApi}/*"
+
+  DisconnectFunctionPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      Action: lambda:InvokeFunction
+      FunctionName: !Ref DisconnectFunction
+      Principal: apigateway.amazonaws.com
+      SourceArn: !Sub "arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${WeatherWebSocketApi}/*"
+
+  MessageFunctionPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      Action: lambda:InvokeFunction
+      FunctionName: !Ref MessageFunction
+      Principal: apigateway.amazonaws.com
+      SourceArn: !Sub "arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${WeatherWebSocketApi}/*"
 
 Outputs:
   WebSocketURI:

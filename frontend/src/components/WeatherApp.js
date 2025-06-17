@@ -1,14 +1,15 @@
+
 import React, { useState, useEffect, useRef } from 'react';
-import { Sun, Cloud, CloudRain, CloudSnow, Wind, Eye, Droplets, Thermometer, Sunrise, Sunset } from 'lucide-react';
+import { Sun, Cloud, CloudRain, CloudSnow, Wind, Eye, Droplets, Thermometer, Sunrise, Sunset, RefreshCw, Loader2 } from 'lucide-react';
 import WeatherStats from './WeatherStats';
 import WeatherIcon from './WeatherIcon';
 import { Bell, X } from 'lucide-react';
 import { useWebSocket } from '../hooks/useWebSocket';
 
-const WEBSOCKET_URL = 'wss://48ezwnk9x6.execute-api.eu-north-1.amazonaws.com/Prod';
+const WEBSOCKET_URL = 'wss://e9z9tauxbc.execute-api.eu-north-1.amazonaws.com/Prod';
 
 const WeatherApp = () => {
-    // Mock weather data - in production this would come from your API
+    // Initial mock weather data
     const [weatherData, setWeatherData] = useState({
         location: "Paris, FR",
         date: "Monday 29 August",
@@ -18,15 +19,15 @@ const WeatherApp = () => {
             high: 23,
             low: 14,
             wind: "7mph",
-            rain: "0%",
+            rain: "0%", // Calculate from forecast_data on backend TODO
             sunrise: "05:27",
             sunset: "20:57",
             visibility: "10km",
             humidity: "65%",
             pressure: "1013mb",
-            uvIndex: "6"
+            uvIndex: "6" // Requires separate API call from backend TODO
         },
-        hourly: [
+        hourly: [ // Backend doesn't parse forecast_data yet, so using mock data TODO
             { time: "3am", temp: 14, icon: "clear" },
             { time: "6am", temp: 16, icon: "clear" },
             { time: "9am", temp: 17, icon: "clear" },
@@ -35,7 +36,7 @@ const WeatherApp = () => {
             { time: "6pm", temp: 20, icon: "clear" },
             { time: "9pm", temp: 18, icon: "clear" }
         ],
-        daily: [
+        daily: [  // Backend doesn't parse forecast_data yet, so using mock data TODO
             { day: "Tue", date: "30/7", low: 10, high: 21, wind: "12mph", rain: "0%", icon: "clear" },
             { day: "Wed", date: "31/7", low: 9, high: 18, wind: "7mph", rain: "3%", icon: "cloudy" },
             { day: "Thu", date: "1/8", low: 7, high: 15, wind: "11mph", rain: "75%", icon: "rain" },
@@ -45,9 +46,25 @@ const WeatherApp = () => {
     });
 
     const [currentTime, setCurrentTime] = useState(new Date().toLocaleTimeString());
+    const [lastUpdated, setLastUpdated] = useState(new Date().toLocaleTimeString());
 
-    // Inside your WeatherApp component, add this after your existing useState calls:
-    const { isConnected, notifications, clearNotifications } = useWebSocket(WEBSOCKET_URL);
+    // WebSocket hook with weather functionality
+    const {
+        isConnected,
+        notifications,
+        weatherData: liveWeatherData,
+        isLoadingWeather,
+        clearNotifications,
+        requestWeatherUpdate
+    } = useWebSocket(WEBSOCKET_URL);
+
+    // Update weather data when live data is received
+    useEffect(() => {
+        if (liveWeatherData) {
+            setWeatherData(liveWeatherData);
+            setLastUpdated(new Date().toLocaleTimeString());
+        }
+    }, [liveWeatherData]);
 
     useEffect(() => {
         // Set time immediately when component mounts
@@ -58,9 +75,8 @@ const WeatherApp = () => {
             setCurrentTime(new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }));
         }, 60000);
 
-        // Cleanup interval on unmount
         return () => clearInterval(timer);
-    }, []); // Empty dependency array means the interval is only set once when the component mounts
+    }, []);
 
     const wakeLockRef = useRef(null);
 
@@ -89,6 +105,12 @@ const WeatherApp = () => {
             }
         };
     }, []);
+
+    const handleRefreshWeather = () => {
+        if (isConnected && !isLoadingWeather) {
+            requestWeatherUpdate();
+        }
+    };
 
     const NotificationPanel = () => {
         if (notifications.length === 0) return null;
@@ -265,10 +287,52 @@ const WeatherApp = () => {
                     </div>
                 </div>
 
+                {/* Control Panel */}
+                <div className="bg-white/10 backdrop-blur-md rounded-2xl p-6 mt-6">
+                    <h2 className="text-white text-xl font-medium mb-4">Live Weather Controls</h2>
+                    <div className="flex flex-col sm:flex-row items-center justify-between space-y-4 sm:space-y-0 sm:space-x-4">
+                        <div className="flex items-center space-x-4">
+                            <div className={`flex items-center space-x-2 px-3 py-1 rounded-full text-sm ${
+                                isConnected ? 'bg-green-500/20 text-green-300' : 'bg-red-500/20 text-red-300'
+                            }`}>
+                                <div className={`w-2 h-2 rounded-full ${isConnected ? 'bg-green-400' : 'bg-red-400'}`} />
+                                <span>{isConnected ? 'Connected' : 'Disconnected'}</span>
+                            </div>
+                            <span className="text-blue-100 text-sm">
+                                Last updated: {lastUpdated}
+                            </span>
+                        </div>
+
+                        <div className="flex space-x-3">
+                            <button
+                                onClick={handleRefreshWeather}
+                                disabled={!isConnected || isLoadingWeather}
+                                className="flex items-center space-x-2 bg-white/20 hover:bg-white/30 disabled:bg-white/10 disabled:cursor-not-allowed text-white px-4 py-2 rounded-lg transition-colors"
+                            >
+                                {isLoadingWeather ? (
+                                    <Loader2 className="w-4 h-4 animate-spin" />
+                                ) : (
+                                    <RefreshCw className="w-4 h-4" />
+                                )}
+                                <span>{isLoadingWeather ? 'Updating...' : 'Update Weather'}</span>
+                            </button>
+
+                            {notifications.length > 0 && (
+                                <button
+                                    onClick={clearNotifications}
+                                    className="flex items-center space-x-2 bg-blue-500/20 hover:bg-blue-500/30 text-blue-200 px-4 py-2 rounded-lg transition-colors"
+                                >
+                                    <Bell className="w-4 h-4" />
+                                    <span>Clear ({notifications.length})</span>
+                                </button>
+                            )}
+                        </div>
+                    </div>
+                </div>
+
                 {/* Footer */}
                 <footer className="text-center mt-8 text-blue-100 text-sm">
-                    {/* Currently only updates time */}
-                    <p>Updates every 15 minutes • Last updated: {currentTime}</p>
+                    <p>Live weather updates via WebSocket • Powered by OpenWeatherMap API</p>
                 </footer>
             </div>
         </div>

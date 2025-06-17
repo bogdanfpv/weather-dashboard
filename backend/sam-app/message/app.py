@@ -2,20 +2,116 @@ import json
 import boto3
 import os
 import time
+import requests
+from datetime import datetime
 
 dynamodb = boto3.resource('dynamodb')
 table = dynamodb.Table(os.environ['CONNECTIONS_TABLE'])
 
-# API Gateway Management API client for sending messages back to WebSocket clients
+# Add your OpenWeatherMap API key as an environment variable
+OPENWEATHER_API_KEY = os.environ.get('OPENWEATHER_API_KEY', '60aca708ebaceefe441a9aa0e5a77717')
+
 def get_apigw_client(event):
     endpoint = f"https://{event['requestContext']['domainName']}/{event['requestContext']['stage']}"
     return boto3.client('apigatewaymanagementapi', endpoint_url=endpoint)
 
+def fetch_weather_data(city="Paris", country="FR"):
+    """Fetch weather data from OpenWeatherMap API"""
+    try:
+        # Current weather
+        current_url = f"http://api.openweathermap.org/data/2.5/weather?q={city},{country}&appid={OPENWEATHER_API_KEY}&units=metric"
+        current_response = requests.get(current_url, timeout=10)
+        current_data = current_response.json()
+
+        #Watch for deprecation of One call 2.5
+        if current_response.status_code != 200:
+            raise Exception(f"OpenWeatherMap API error: {current_data.get('message', 'Unknown error')}")
+
+        # 5-day forecast
+        forecast_url = f"http://api.openweathermap.org/data/2.5/forecast?q={city},{country}&appid={OPENWEATHER_API_KEY}&units=metric"
+        forecast_response = requests.get(forecast_url, timeout=10)
+        forecast_data = forecast_response.json()
+
+        # Transform the data to match your frontend format
+        weather_update = {
+            "location": f"{current_data['name']}, {current_data['sys']['country']}",
+            "date": datetime.now().strftime("%A %d %B"),
+            "current": {
+                "temp": round(current_data['main']['temp']),
+                "condition": current_data['weather'][0]['description'].title(),
+                "high": round(current_data['main']['temp_max']),
+                "low": round(current_data['main']['temp_min']),
+                "wind": f"{round(current_data['wind']['speed'] * 3.6)}mph",  # Convert m/s to mph
+                "rain": "0%",  # You could calculate this from forecast data
+                "sunrise": datetime.fromtimestamp(current_data['sys']['sunrise']).strftime("%H:%M"),
+                "sunset": datetime.fromtimestamp(current_data['sys']['sunset']).strftime("%H:%M"),
+                "visibility": f"{current_data.get('visibility', 10000) / 1000}km",
+                "humidity": f"{current_data['main']['humidity']}%",
+                "pressure": f"{current_data['main']['pressure']}mb",
+                "uvIndex": "N/A"  # UV index requires separate API call
+            },
+            "hourly": [],  # You could parse forecast_data for hourly data
+            "daily": []    # You could parse forecast_data for daily data
+        }
+
+        # Parse hourly data (next 7 entries from 3-hour forecast)
+        for i, item in enumerate(forecast_data['list'][:7]):
+            hour_data = {
+                "time": datetime.fromtimestamp(item['dt']).strftime("%I%p").lower(),
+                "temp": round(item['main']['temp']),
+                "icon": map_weather_icon(item['weather'][0]['main'])
+            }
+            weather_update["hourly"].append(hour_data)
+
+        # Parse daily data (group by day)
+        daily_data = {}
+        for item in forecast_data['list']:
+            date = datetime.fromtimestamp(item['dt']).date()
+            if date not in daily_data:
+                daily_data[date] = {
+                    "temps": [],
+                    "conditions": [],
+                    "winds": []
+                }
+            daily_data[date]["temps"].append(item['main']['temp'])
+            daily_data[date]["conditions"].append(item['weather'][0]['main'])
+            daily_data[date]["winds"].append(item['wind']['speed'])
+
+        # Convert daily data to frontend format (next 5 days)
+        for i, (date, data) in enumerate(list(daily_data.items())[:5]):
+            day_data = {
+                "day": date.strftime("%a"),
+                "date": date.strftime("%d/%m"),
+                "low": round(min(data["temps"])),
+                "high": round(max(data["temps"])),
+                "wind": f"{round(max(data['winds']) * 3.6)}mph",
+                "rain": "0%",  # You could calculate this
+                "icon": map_weather_icon(max(set(data["conditions"]), key=data["conditions"].count))
+            }
+            weather_update["daily"].append(day_data)
+
+        return weather_update
+
+    except Exception as e:
+        print(f"Error fetching weather data: {str(e)}")
+        raise
+
+def map_weather_icon(condition):
+    """Map OpenWeatherMap conditions to your icon system"""
+    condition_map = {
+        "Clear": "clear",
+        "Clouds": "cloudy",
+        "Rain": "rain",
+        "Drizzle": "rain",
+        "Thunderstorm": "rain",
+        "Snow": "snow",
+        "Mist": "cloudy",
+        "Fog": "cloudy"
+    }
+    return condition_map.get(condition, "clear")
+
 def lambda_handler(event, context):
-    """
-    Handle incoming WebSocket messages
-    Echo the message back to the sender, or broadcast to all connections
-    """
+    """Handle incoming WebSocket messages"""
     connection_id = event['requestContext']['connectionId']
 
     try:
@@ -26,7 +122,12 @@ def lambda_handler(event, context):
 
         apigw_client = get_apigw_client(event)
 
-        if message_type == 'broadcast':
+        if message_type == 'get_weather':
+            # Fetch weather data and broadcast to all clients
+            city = body.get('city', 'Paris')
+            country = body.get('country', 'FR')
+            return handle_weather_request(apigw_client, connection_id, city, country)
+        elif message_type == 'broadcast':
             # Send message to all connected clients
             return broadcast_message(apigw_client, message_data, connection_id)
         else:
@@ -35,10 +136,66 @@ def lambda_handler(event, context):
 
     except Exception as e:
         print(f"Error handling message from {connection_id}: {str(e)}")
-
         return {
             'statusCode': 500,
             'body': json.dumps('Failed to handle message')
+        }
+
+def handle_weather_request(apigw_client, connection_id, city, country):
+    """Handle weather data request and broadcast to all clients"""
+    try:
+        # Fetch weather data
+        weather_data = fetch_weather_data(city, country)
+
+        broadcast_data = {
+            'type': 'weather_update',
+            'data': weather_data,
+            'timestamp': int(time.time()),
+            'requested_by': connection_id
+        }
+
+        try:
+            apigw_client.post_to_connection(
+            ConnectionId=connection_id,
+            Data=json.dumps(broadcast_data)
+        )
+
+        except apigw_client.exceptions.GoneException:
+            #Connection is stale remove it from DynamoDB
+            table.delete_item(Key={'connectionId': connection_id}
+        except apigw_client.exceptions.LimitExceededException:
+            print(f"Rate limit exceeded: {str(e)}")
+        except Exception as e:
+            print(f"Unexpected error posting to connection{str(e)}")
+
+        return {
+            'statusCode': 200,
+            'body': json.dumps({
+                'message': 'Weather data fetched and broadcast successfully',
+                'successful_sends': successful_sends,
+                'failed_sends': failed_sends
+            })
+        }
+
+    except Exception as e:
+        print(f"Error handling weather request: {str(e)}")
+        # Send error message back to requester
+        try:
+            error_data = {
+                'type': 'weather_error',
+                'message': f'Failed to fetch weather data: {str(e)}',
+                'timestamp': int(time.time())
+            }
+            apigw_client.post_to_connection(
+                ConnectionId=connection_id,
+                Data=json.dumps(error_data)
+            )
+        except:
+            pass
+
+        return {
+            'statusCode': 500,
+            'body': json.dumps(f'Weather request failed: {str(e)}')
         }
 
 def echo_message(apigw_client, connection_id, message):

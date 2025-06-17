@@ -3,6 +3,8 @@ import { useState, useEffect, useRef, useCallback } from 'react';
 export function useWebSocket(url) {
     const [isConnected, setIsConnected] = useState(false);
     const [notifications, setNotifications] = useState([]);
+    const [weatherData, setWeatherData] = useState(null);
+    const [isLoadingWeather, setIsLoadingWeather] = useState(false);
     const wsRef = useRef(null);
     const reconnectTimeoutRef = useRef(null);
 
@@ -20,18 +22,60 @@ export function useWebSocket(url) {
             wsRef.current.onmessage = (event) => {
                 try {
                     const data = JSON.parse(event.data);
-                    console.log('WebSocket notification:', data);
+                    console.log('WebSocket message received:', data);
 
-                    // Add notification to list
-                    setNotifications(prev => [data, ...prev.slice(0, 9)]); // Keep last 10
+                    // Handle API Gateway error responses
+                    if (data.message === 'Forbidden' || data.message === 'Internal server error') {
+                        console.error('API Gateway error:', data);
+                        setIsLoadingWeather(false);
+                        setNotifications(prev => [{
+                            type: 'error',
+                            message: `API Error: ${data.message}. Check your WebSocket configuration.`,
+                            timestamp: Math.floor(Date.now() / 1000)
+                        }, ...prev.slice(0, 9)]);
+                        return;
+                    }
+
+                    // Handle different message types
+                    switch (data.type) {
+                        case 'weather_update':
+                            console.log('Weather data updated:', data.data);
+                            setWeatherData(data.data);
+                            setIsLoadingWeather(false);
+                            setNotifications(prev => [{
+                                type: 'weather_alert',
+                                message: `Weather data updated for ${data.data.location}`,
+                                timestamp: data.timestamp
+                            }, ...prev.slice(0, 9)]);
+                            break;
+
+                        case 'weather_error':
+                            console.error('Weather fetch error:', data.message);
+                            setIsLoadingWeather(false);
+                            setNotifications(prev => [{
+                                type: 'error',
+                                message: data.message,
+                                timestamp: data.timestamp
+                            }, ...prev.slice(0, 9)]);
+                            break;
+
+                        case 'test':
+                        case 'broadcast':
+                        case 'echo':
+                        default:
+                            setNotifications(prev => [data, ...prev.slice(0, 9)]);
+                            break;
+                    }
                 } catch (e) {
                     console.error('Error parsing WebSocket message:', e);
+                    setIsLoadingWeather(false);
                 }
             };
 
-            wsRef.current.onclose = () => {
-                console.log('WebSocket disconnected');
+            wsRef.current.onclose = (event) => {
+                console.log('WebSocket disconnected. Code:', event.code, 'Reason:', event.reason);
                 setIsConnected(false);
+                setIsLoadingWeather(false);
 
                 // Auto-reconnect after 5 seconds
                 reconnectTimeoutRef.current = setTimeout(connect, 5000);
@@ -40,6 +84,7 @@ export function useWebSocket(url) {
             wsRef.current.onerror = (error) => {
                 console.error('WebSocket error:', error);
                 setIsConnected(false);
+                setIsLoadingWeather(false);
             };
 
         } catch (error) {
@@ -56,7 +101,51 @@ export function useWebSocket(url) {
             wsRef.current = null;
         }
         setIsConnected(false);
+        setIsLoadingWeather(false);
     }, []);
+
+    const sendMessage = useCallback((message) => {
+        if (wsRef.current?.readyState === WebSocket.OPEN) {
+            try {
+                const messageStr = JSON.stringify(message);
+                console.log('Sending WebSocket message:', messageStr);
+                wsRef.current.send(messageStr);
+                return true;
+            } catch (error) {
+                console.error('Error sending WebSocket message:', error);
+                return false;
+            }
+        } else {
+            console.error('WebSocket is not connected. Ready state:', wsRef.current?.readyState);
+            return false;
+        }
+    }, []);
+
+    const requestWeatherUpdate = useCallback((city = 'Paris', country = 'FR') => {
+        if (!isConnected) {
+            console.error('Cannot request weather: WebSocket not connected');
+            setNotifications(prev => [{
+                type: 'error',
+                message: 'Cannot update weather: Not connected to server',
+                timestamp: Math.floor(Date.now() / 1000)
+            }, ...prev.slice(0, 9)]);
+            return false;
+        }
+
+        setIsLoadingWeather(true);
+        const success = sendMessage({
+            action: 'get_weather',
+            city: city,
+            country: country,
+            timestamp: Math.floor(Date.now() / 1000)
+        });
+
+        if (!success) {
+            setIsLoadingWeather(false);
+        }
+
+        return success;
+    }, [isConnected, sendMessage]);
 
     useEffect(() => {
         connect();
@@ -70,6 +159,10 @@ export function useWebSocket(url) {
     return {
         isConnected,
         notifications,
-        clearNotifications
+        weatherData,
+        isLoadingWeather,
+        clearNotifications,
+        sendMessage,
+        requestWeatherUpdate
     };
 }

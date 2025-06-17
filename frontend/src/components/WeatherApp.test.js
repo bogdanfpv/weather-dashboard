@@ -91,9 +91,6 @@ describe('WeatherApp', () => {
 
     test('displays footer information', () => {
         render(<WeatherApp />);
-
-        // Test footer text
-        expect(screen.getByText(/Updates every 15 minutes/)).toBeInTheDocument();
         expect(screen.getByText(/Last updated:/)).toBeInTheDocument();
     });
 });

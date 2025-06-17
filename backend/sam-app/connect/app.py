@@ -19,21 +19,26 @@ def lambda_handler(event, context):
             }
         )
 
-        # Send a test message to the new connection
-        endpoint = f"https://{event['requestContext']['domainName']}/{event['requestContext']['stage']}"
-        apigw_client = boto3.client('apigatewaymanagementapi', endpoint_url=endpoint)
-        apigw_client.post_to_connection(
-            ConnectionId=connection_id,
-            Data=json.dumps({
-                'type': 'test',
-                'message': 'Welcome! This is a test message.',
-                'timestamp': int(time.time())
-            })
-        )
+        # Don't fail the connection if sending welcome message fails
+        try:
+            # Send a test message to the new connection
+            endpoint = f"https://{event['requestContext']['domainName']}/{event['requestContext']['stage']}"
+            apigw_client = boto3.client('apigatewaymanagementapi', endpoint_url=endpoint)
+            apigw_client.post_to_connection(
+                ConnectionId=connection_id,
+                Data=json.dumps({
+                    'type': 'test',
+                    'message': 'Welcome! This is a test message.',
+                    'timestamp': int(time.time())
+                })
+            )
+        except Exception as msg_error:
+            # Log but don't fail the connection
+            print(f"Welcome message failed: {str(msg_error)}")
 
         return {
             'statusCode': 200,
-            'body': json.dumps('Connected and test message sent')
+            'body': json.dumps('Connected successfully')
         }
 
     except Exception as e:
