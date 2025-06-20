@@ -32,6 +32,11 @@ def fetch_weather_data(city="Paris", country="FR"):
         forecast_response = requests.get(forecast_url, timeout=10)
         forecast_data = forecast_response.json()
 
+        # UV index (optional, requires separate API call)
+        uv_url = f"http://api.openweathermap.org/data/2.5/uvi?lat={current_data['coord']['lat']}&lon={current_data['coord']['lon']}&appid={OPENWEATHER_API_KEY}"
+        uv_response = requests.get(uv_url, timeout=10)
+        uv_data = uv_response.json()
+
         # Transform the data to match your frontend format
         weather_update = {
             "location": f"{current_data['name']}, {current_data['sys']['country']}",
@@ -41,21 +46,20 @@ def fetch_weather_data(city="Paris", country="FR"):
                 "condition": current_data['weather'][0]['description'].title(),
                 "high": round(current_data['main']['temp_max']),
                 "low": round(current_data['main']['temp_min']),
-                "wind": f"{round(current_data['wind']['speed'] * 3.6)}mph",  # Convert m/s to mph
-                "rain": "0%",  # You could calculate this from forecast data
+                "wind": f"{round(current_data['wind']['speed'])}km/h",
+                "sky": f"{current_data['weather'][0][main]}",
                 "sunrise": datetime.fromtimestamp(current_data['sys']['sunrise']).strftime("%H:%M"),
                 "sunset": datetime.fromtimestamp(current_data['sys']['sunset']).strftime("%H:%M"),
                 "visibility": f"{current_data.get('visibility', 10000) / 1000}km",
                 "humidity": f"{current_data['main']['humidity']}%",
                 "pressure": f"{current_data['main']['pressure']}mb",
-                "uvIndex": "N/A"  # UV index requires separate API call
+                "uvIndex": f"{uv_data['value'] if 'value' in uv_data else 'N/A'}",
             },
-            "hourly": [],  # You could parse forecast_data for hourly data
-            "daily": []    # You could parse forecast_data for daily data
+            "hourly": [],
+            "daily": []
         }
 
-        # Parse hourly data (next 7 entries from 3-hour forecast)
-        for i, item in enumerate(forecast_data['list'][:7]):
+        for item in forecast_data['list'][:7]:
             hour_data = {
                 "time": datetime.fromtimestamp(item['dt']).strftime("%I%p").lower(),
                 "temp": round(item['main']['temp']),
@@ -63,7 +67,6 @@ def fetch_weather_data(city="Paris", country="FR"):
             }
             weather_update["hourly"].append(hour_data)
 
-        # Parse daily data (group by day)
         daily_data = {}
         for item in forecast_data['list']:
             date = datetime.fromtimestamp(item['dt']).date()

@@ -18,16 +18,16 @@ const WeatherApp = () => {
             condition: "Mostly sunny",
             high: 23,
             low: 14,
-            wind: "7mph",
-            rain: "0%", // Calculate from forecast_data on backend TODO
+            wind: "7km/h",
+            sky: "clear",
             sunrise: "05:27",
             sunset: "20:57",
             visibility: "10km",
             humidity: "65%",
             pressure: "1013mb",
-            uvIndex: "6" // Requires separate API call from backend TODO
+            uvIndex: "6"
         },
-        hourly: [ // Backend doesn't parse forecast_data yet, so using mock data TODO
+        hourly: [
             { time: "3am", temp: 14, icon: "clear" },
             { time: "6am", temp: 16, icon: "clear" },
             { time: "9am", temp: 17, icon: "clear" },
@@ -36,12 +36,12 @@ const WeatherApp = () => {
             { time: "6pm", temp: 20, icon: "clear" },
             { time: "9pm", temp: 18, icon: "clear" }
         ],
-        daily: [  // Backend doesn't parse forecast_data yet, so using mock data TODO
-            { day: "Tue", date: "30/7", low: 10, high: 21, wind: "12mph", rain: "0%", icon: "clear" },
-            { day: "Wed", date: "31/7", low: 9, high: 18, wind: "7mph", rain: "3%", icon: "cloudy" },
-            { day: "Thu", date: "1/8", low: 7, high: 15, wind: "11mph", rain: "75%", icon: "rain" },
-            { day: "Fri", date: "2/8", low: 10, high: 21, wind: "3mph", rain: "5%", icon: "clear" },
-            { day: "Sat", date: "3/8", low: 12, high: 24, wind: "8mph", rain: "2%", icon: "clear" }
+        daily: [
+            { day: "Tue", date: "30/7", low: 10, high: 21, wind: "12km/h", rain: "0%", icon: "clear" },
+            { day: "Wed", date: "31/7", low: 9, high: 18, wind: "7km/h", rain: "3%", icon: "cloudy" },
+            { day: "Thu", date: "1/8", low: 7, high: 15, wind: "11km/h", rain: "75%", icon: "rain" },
+            { day: "Fri", date: "2/8", low: 10, high: 21, wind: "3km/h", rain: "5%", icon: "clear" },
+            { day: "Sat", date: "3/8", low: 12, high: 24, wind: "8km/h", rain: "2%", icon: "clear" }
         ]
     });
 
@@ -204,8 +204,8 @@ const WeatherApp = () => {
                                 </div>
                                 <div className="flex flex-col items-center">
                                     <Droplets className="w-5 h-5 mb-1 text-blue-300" />
-                                    <span className="text-blue-100">Rain</span>
-                                    <span className="font-medium">{weatherData.current.rain}</span>
+                                    <span className="text-blue-100">Sky</span>
+                                    <span className="font-medium">{weatherData.current.sky}</span>
                                 </div>
                             </div>
                         </div>
