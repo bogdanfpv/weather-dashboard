@@ -1,8 +1,8 @@
 import { render, screen } from '@testing-library/react';
-import App from './App';
+import Page from '../app/page';
 
 test('renders weather app', () => {
-  render(<App />);
+  render(<Page />);
 
   // Check for main elements that should always be present
   expect(screen.getByText(/Paris, FR/i)).toBeInTheDocument();

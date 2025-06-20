@@ -1,3 +1,4 @@
+"use client";
 
 import React, { useState, useEffect, useRef } from 'react';
 import { Sun, Cloud, CloudRain, CloudSnow, Wind, Eye, Droplets, Thermometer, Sunrise, Sunset, RefreshCw, Loader2 } from 'lucide-react';
@@ -45,8 +46,9 @@ const WeatherApp = () => {
         ]
     });
 
-    const [currentTime, setCurrentTime] = useState(new Date().toLocaleTimeString());
-    const [lastUpdated, setLastUpdated] = useState(new Date().toLocaleTimeString());
+    const [currentTime, setCurrentTime] = useState('');
+    const [lastUpdated, setLastUpdated] = useState('');
+    const [isClient, setIsClient] = useState(false);
 
     // WebSocket hook with weather functionality
     const {
@@ -66,44 +68,59 @@ const WeatherApp = () => {
         }
     }, [liveWeatherData]);
 
+    // Fixed hydration-safe time handling
     useEffect(() => {
-        // Set time immediately when component mounts
-        setCurrentTime(new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }));
+        // Mark as client-side and set initial time
+        setIsClient(true);
+
+        const updateTime = () => {
+            const now = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+            setCurrentTime(now);
+            if (!lastUpdated) {
+                setLastUpdated(now);
+            }
+        };
+
+        // Set initial time
+        updateTime();
 
         // Update time every 60 seconds
-        const timer = setInterval(() => {
-            setCurrentTime(new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }));
-        }, 60000);
+        const timer = setInterval(updateTime, 60000);
 
         return () => clearInterval(timer);
-    }, []);
+    }, [lastUpdated]);
 
     const wakeLockRef = useRef(null);
 
     useEffect(() => {
         const requestWakeLock = async () => {
             try {
-                wakeLockRef.current = await navigator.wakeLock.request('screen');
+                if ('wakeLock' in navigator) {
+                    wakeLockRef.current = await navigator.wakeLock.request('screen');
+                }
             } catch (err) {
                 console.log('Wake Lock error:', err.message);
             }
         };
 
-        if ('wakeLock' in navigator) {
+        if (typeof window !== 'undefined' && 'wakeLock' in navigator) {
             requestWakeLock();
 
-            document.addEventListener('visibilitychange', () => {
+            const handleVisibilityChange = () => {
                 if (document.visibilityState === 'visible' && !wakeLockRef.current) {
                     requestWakeLock();
                 }
-            });
-        }
+            };
 
-        return () => {
-            if (wakeLockRef.current) {
-                wakeLockRef.current.release();
-            }
-        };
+            document.addEventListener('visibilitychange', handleVisibilityChange);
+
+            return () => {
+                document.removeEventListener('visibilitychange', handleVisibilityChange);
+                if (wakeLockRef.current) {
+                    wakeLockRef.current.release();
+                }
+            };
+        }
     }, []);
 
     const handleRefreshWeather = () => {
@@ -161,7 +178,9 @@ const WeatherApp = () => {
                 <header className="text-center mb-6">
                     <div className="flex items-center justify-center space-x-2 mb-2">
                         <h1 className="text-white text-2xl md:text-3xl font-light">
-                            {weatherData.location} • {currentTime}
+                            {weatherData.location}
+                            {/* Only show time after client hydration to prevent mismatch */}
+                            {isClient && currentTime && ` • ${currentTime}`}
                         </h1>
                         <div className={`w-2 h-2 rounded-full ${isConnected ? 'bg-green-400' : 'bg-red-400'}`}
                              title={isConnected ? 'Live updates connected' : 'Live updates disconnected'} />
@@ -298,9 +317,12 @@ const WeatherApp = () => {
                                 <div className={`w-2 h-2 rounded-full ${isConnected ? 'bg-green-400' : 'bg-red-400'}`} />
                                 <span>{isConnected ? 'Connected' : 'Disconnected'}</span>
                             </div>
-                            <span className="text-blue-100 text-sm">
-                                Last updated: {lastUpdated}
-                            </span>
+                            {/* Only show last updated time after client hydration */}
+                            {isClient && lastUpdated && (
+                                <span className="text-blue-100 text-sm">
+                                    Last updated: {lastUpdated}
+                                </span>
+                            )}
                         </div>
 
                         <div className="flex space-x-3">
