@@ -1,9 +1,26 @@
 {
   "pages": {
-    "/api/update-weather/route": [
-      "static/chunks/webpack.js",
-      "static/chunks/main-app.js",
-      "static/chunks/app/api/update-weather/route.js"
+    "/_not-found/page": [
+      "static/chunks/webpack-6a4bc510c2a18af6.js",
+      "static/chunks/4bd1b696-01da3eb66f93742b.js",
+      "static/chunks/684-bc405e7501a92670.js",
+      "static/chunks/main-app-67d2953d4a2a271a.js",
+      "static/chunks/app/_not-found/page-aad4b4c1519d27a0.js"
+    ],
+    "/layout": [
+      "static/chunks/webpack-6a4bc510c2a18af6.js",
+      "static/chunks/4bd1b696-01da3eb66f93742b.js",
+      "static/chunks/684-bc405e7501a92670.js",
+      "static/chunks/main-app-67d2953d4a2a271a.js",
+      "static/css/5f0dccb0761f77b5.css",
+      "static/chunks/app/layout-42d7e7656d9d237d.js"
+    ],
+    "/page": [
+      "static/chunks/webpack-6a4bc510c2a18af6.js",
+      "static/chunks/4bd1b696-01da3eb66f93742b.js",
+      "static/chunks/684-bc405e7501a92670.js",
+      "static/chunks/main-app-67d2953d4a2a271a.js",
+      "static/chunks/app/page-bf3be17df4705616.js"
     ]
   }
 }
