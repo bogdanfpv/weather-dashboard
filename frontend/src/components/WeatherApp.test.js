@@ -38,7 +38,7 @@ describe('WeatherApp', () => {
         // Test weather values (using getAllByText to handle duplicates)
         expect(screen.getAllByText('23°').length).toBeGreaterThan(0);
         expect(screen.getAllByText('14°').length).toBeGreaterThan(0);
-        expect(screen.getAllByText('7mph').length).toBeGreaterThan(0);
+        expect(screen.getAllByText('7km/h').length).toBeGreaterThan(0);
         expect(screen.getAllByText('0%').length).toBeGreaterThan(0);
     });
 

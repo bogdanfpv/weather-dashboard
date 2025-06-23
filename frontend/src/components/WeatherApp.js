@@ -1,3 +1,4 @@
+"use client";
 
 import React, { useState, useEffect, useRef } from 'react';
 import { Sun, Cloud, CloudRain, CloudSnow, Wind, Eye, Droplets, Thermometer, Sunrise, Sunset, RefreshCw, Loader2 } from 'lucide-react';
@@ -18,16 +19,16 @@ const WeatherApp = () => {
             condition: "Mostly sunny",
             high: 23,
             low: 14,
-            wind: "7mph",
-            rain: "0%", // Calculate from forecast_data on backend TODO
+            wind: "7km/h",
+            sky: "clear",
             sunrise: "05:27",
             sunset: "20:57",
             visibility: "10km",
             humidity: "65%",
             pressure: "1013mb",
-            uvIndex: "6" // Requires separate API call from backend TODO
+            uvIndex: "6"
         },
-        hourly: [ // Backend doesn't parse forecast_data yet, so using mock data TODO
+        hourly: [
             { time: "3am", temp: 14, icon: "clear" },
             { time: "6am", temp: 16, icon: "clear" },
             { time: "9am", temp: 17, icon: "clear" },
@@ -36,17 +37,18 @@ const WeatherApp = () => {
             { time: "6pm", temp: 20, icon: "clear" },
             { time: "9pm", temp: 18, icon: "clear" }
         ],
-        daily: [  // Backend doesn't parse forecast_data yet, so using mock data TODO
-            { day: "Tue", date: "30/7", low: 10, high: 21, wind: "12mph", rain: "0%", icon: "clear" },
-            { day: "Wed", date: "31/7", low: 9, high: 18, wind: "7mph", rain: "3%", icon: "cloudy" },
-            { day: "Thu", date: "1/8", low: 7, high: 15, wind: "11mph", rain: "75%", icon: "rain" },
-            { day: "Fri", date: "2/8", low: 10, high: 21, wind: "3mph", rain: "5%", icon: "clear" },
-            { day: "Sat", date: "3/8", low: 12, high: 24, wind: "8mph", rain: "2%", icon: "clear" }
+        daily: [
+            { day: "Tue", date: "30/7", low: 10, high: 21, wind: "12km/h", rain: "0%", icon: "clear" },
+            { day: "Wed", date: "31/7", low: 9, high: 18, wind: "7km/h", rain: "3%", icon: "cloudy" },
+            { day: "Thu", date: "1/8", low: 7, high: 15, wind: "11km/h", rain: "75%", icon: "rain" },
+            { day: "Fri", date: "2/8", low: 10, high: 21, wind: "3km/h", rain: "5%", icon: "clear" },
+            { day: "Sat", date: "3/8", low: 12, high: 24, wind: "8km/h", rain: "2%", icon: "clear" }
         ]
     });
 
-    const [currentTime, setCurrentTime] = useState(new Date().toLocaleTimeString());
-    const [lastUpdated, setLastUpdated] = useState(new Date().toLocaleTimeString());
+    const [currentTime, setCurrentTime] = useState('');
+    const [lastUpdated, setLastUpdated] = useState('');
+    const [isClient, setIsClient] = useState(false);
 
     // WebSocket hook with weather functionality
     const {
@@ -58,6 +60,23 @@ const WeatherApp = () => {
         requestWeatherUpdate
     } = useWebSocket(WEBSOCKET_URL);
 
+    useEffect(() => {
+        const fetchCachedWeather = async () => {
+            try {
+                const response = await fetch('/api/get-cached-weather');
+                if (response.ok) {
+                    const { data, lastUpdated } = await response.json();
+                    setWeatherData(data);
+                    setLastUpdated(new Date(lastUpdated).toLocaleTimeString());
+                }
+            } catch (error) {
+                console.error('Failed to fetch cached weather data:', error);
+            }
+        };
+
+        fetchCachedWeather();
+    }, []);
+
     // Update weather data when live data is received
     useEffect(() => {
         if (liveWeatherData) {
@@ -66,44 +85,59 @@ const WeatherApp = () => {
         }
     }, [liveWeatherData]);
 
+    // Fixed hydration-safe time handling
     useEffect(() => {
-        // Set time immediately when component mounts
-        setCurrentTime(new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }));
+        // Mark as client-side and set initial time
+        setIsClient(true);
+
+        const updateTime = () => {
+            const now = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+            setCurrentTime(now);
+            if (!lastUpdated) {
+                setLastUpdated(now);
+            }
+        };
+
+        // Set initial time
+        updateTime();
 
         // Update time every 60 seconds
-        const timer = setInterval(() => {
-            setCurrentTime(new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }));
-        }, 60000);
+        const timer = setInterval(updateTime, 60000);
 
         return () => clearInterval(timer);
-    }, []);
+    }, [lastUpdated]);
 
     const wakeLockRef = useRef(null);
 
     useEffect(() => {
         const requestWakeLock = async () => {
             try {
-                wakeLockRef.current = await navigator.wakeLock.request('screen');
+                if ('wakeLock' in navigator) {
+                    wakeLockRef.current = await navigator.wakeLock.request('screen');
+                }
             } catch (err) {
                 console.log('Wake Lock error:', err.message);
             }
         };
 
-        if ('wakeLock' in navigator) {
+        if (typeof window !== 'undefined' && 'wakeLock' in navigator) {
             requestWakeLock();
 
-            document.addEventListener('visibilitychange', () => {
+            const handleVisibilityChange = () => {
                 if (document.visibilityState === 'visible' && !wakeLockRef.current) {
                     requestWakeLock();
                 }
-            });
-        }
+            };
 
-        return () => {
-            if (wakeLockRef.current) {
-                wakeLockRef.current.release();
-            }
-        };
+            document.addEventListener('visibilitychange', handleVisibilityChange);
+
+            return () => {
+                document.removeEventListener('visibilitychange', handleVisibilityChange);
+                if (wakeLockRef.current) {
+                    wakeLockRef.current.release();
+                }
+            };
+        }
     }, []);
 
     const handleRefreshWeather = () => {
@@ -161,7 +195,9 @@ const WeatherApp = () => {
                 <header className="text-center mb-6">
                     <div className="flex items-center justify-center space-x-2 mb-2">
                         <h1 className="text-white text-2xl md:text-3xl font-light">
-                            {weatherData.location} • {currentTime}
+                            {weatherData.location}
+                            {/* Only show time after client hydration to prevent mismatch */}
+                            {isClient && currentTime && ` • ${currentTime}`}
                         </h1>
                         <div className={`w-2 h-2 rounded-full ${isConnected ? 'bg-green-400' : 'bg-red-400'}`}
                              title={isConnected ? 'Live updates connected' : 'Live updates disconnected'} />
@@ -204,8 +240,8 @@ const WeatherApp = () => {
                                 </div>
                                 <div className="flex flex-col items-center">
                                     <Droplets className="w-5 h-5 mb-1 text-blue-300" />
-                                    <span className="text-blue-100">Rain</span>
-                                    <span className="font-medium">{weatherData.current.rain}</span>
+                                    <span className="text-blue-100">Sky</span>
+                                    <span className="font-medium">{weatherData.current.sky}</span>
                                 </div>
                             </div>
                         </div>
@@ -298,9 +334,12 @@ const WeatherApp = () => {
                                 <div className={`w-2 h-2 rounded-full ${isConnected ? 'bg-green-400' : 'bg-red-400'}`} />
                                 <span>{isConnected ? 'Connected' : 'Disconnected'}</span>
                             </div>
-                            <span className="text-blue-100 text-sm">
-                                Last updated: {lastUpdated}
-                            </span>
+                            {/* Only show last updated time after client hydration */}
+                            {isClient && lastUpdated && (
+                                <span className="text-blue-100 text-sm">
+                                    Last updated: {lastUpdated}
+                                </span>
+                            )}
                         </div>
 
                         <div className="flex space-x-3">
