@@ -7,10 +7,10 @@
     }
   ],
   "functions": {
-    "/api/update-weather": {
+    "api/update-weather": {
       "maxDuration": 30
     },
-    "/api/get-cached-weather": {
+    "api/get-cached-weather": {
       "maxDuration": 10
     }
   }
