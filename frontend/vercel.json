@@ -5,13 +5,5 @@
       "path": "/api/update-weather",
       "schedule": "0 12 * * *"
     }
-  ],
-  "functions": {
-    "api/update-weather": {
-      "maxDuration": 30
-    },
-    "api/get-cached-weather": {
-      "maxDuration": 10
-    }
-  }
+  ]
 }
