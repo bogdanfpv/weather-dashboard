@@ -7,10 +7,10 @@
     }
   ],
   "functions": {
-    "app/api/update-weather/route.js": {
+    "/api/update-weather": {
       "maxDuration": 30
     },
-    "app/api/get-cached-weather/route.js": {
+    "/api/get-cached-weather": {
       "maxDuration": 10
     }
   }
