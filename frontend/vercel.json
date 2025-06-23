@@ -1,5 +1,10 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
+  "functions": {
+    "app/api/update-weather/route.js": {
+      "runtime": "edge"
+    }
+  },
   "crons": [
     {
       "path": "/api/update-weather",
