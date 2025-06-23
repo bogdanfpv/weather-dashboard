@@ -60,23 +60,6 @@ const WeatherApp = () => {
         requestWeatherUpdate
     } = useWebSocket(WEBSOCKET_URL);
 
-    useEffect(() => {
-        const fetchCachedWeather = async () => {
-            try {
-                const response = await fetch('/api/get-cached-weather');
-                if (response.ok) {
-                    const { data, lastUpdated } = await response.json();
-                    setWeatherData(data);
-                    setLastUpdated(new Date(lastUpdated).toLocaleTimeString());
-                }
-            } catch (error) {
-                console.error('Failed to fetch cached weather data:', error);
-            }
-        };
-
-        fetchCachedWeather();
-    }, []);
-
     // Update weather data when live data is received
     useEffect(() => {
         if (liveWeatherData) {
