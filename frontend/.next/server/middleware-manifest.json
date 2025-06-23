@@ -1,6 +1,33 @@
 {
   "version": 3,
   "middleware": {},
-  "functions": {},
+  "functions": {
+    "/api/update-weather/route": {
+      "files": [
+        "server/server-reference-manifest.js",
+        "server/app/api/update-weather/route_client-reference-manifest.js",
+        "server/middleware-build-manifest.js",
+        "server/middleware-react-loadable-manifest.js",
+        "server/next-font-manifest.js",
+        "server/interception-route-rewrite-manifest.js",
+        "server/edge-runtime-webpack.js",
+        "server/app/api/update-weather/route.js"
+      ],
+      "name": "app/api/update-weather/route",
+      "page": "/api/update-weather/route",
+      "matchers": [
+        {
+          "regexp": "^/api/update\\-weather$",
+          "originalSource": "/api/update-weather"
+        }
+      ],
+      "wasm": [],
+      "assets": [],
+      "env": {
+        "__NEXT_BUILD_ID": "development",
+        "NEXT_SERVER_ACTIONS_ENCRYPTION_KEY": "mbJceZn1e4LD0PFrIWwbuWFnXga230hdhfOkBng+sEY="
+      }
+    }
+  },
   "sortedMiddleware": []
 }

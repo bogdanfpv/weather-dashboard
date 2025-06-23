@@ -1,72 +1,105 @@
+// app/api/update-weather/route.js
 import { Redis } from '@upstash/redis';
 import { revalidatePath } from 'next/cache';
+
+// Force Edge Runtime - provides browser-like WebSocket support
+export const runtime = 'edge';
 
 export async function GET(request) {
     try {
         console.log('Cron job started - connecting to AWS WebSocket...');
 
-        // Create a promise-based WebSocket connection to YOUR AWS endpoint
+        // In Edge Runtime, WebSocket is available globally (like in browser)
         const weatherData = await new Promise((resolve, reject) => {
-            // Dynamic import to avoid serverless issues
-            import('ws').then(({ WebSocket }) => {
-                const ws = new WebSocket('wss://e9z9tauxbc.execute-api.eu-north-1.amazonaws.com/Prod');
+            let isResolved = false;
 
-                // Set timeout for WebSocket connection
-                const timeoutId = setTimeout(() => {
-                    ws.close();
-                    reject(new Error('WebSocket connection timed out after 25 seconds'));
-                }, 25000); // 25 second timeout (under Vercel's 30s limit)
+            const resolveOnce = (data) => {
+                if (!isResolved) {
+                    isResolved = true;
+                    resolve(data);
+                }
+            };
 
-                ws.on('open', () => {
-                    console.log('WebSocket connected from cron job');
+            const rejectOnce = (error) => {
+                if (!isResolved) {
+                    isResolved = true;
+                    reject(error);
+                }
+            };
 
-                    // Send the same message your frontend sends
-                    ws.send(JSON.stringify({
-                        action: 'get_weather',
-                        city: 'Paris',
-                        country: 'FR',
-                        timestamp: Math.floor(Date.now() / 1000)
-                    }));
-                });
+            const ws = new WebSocket('wss://e9z9tauxbc.execute-api.eu-north-1.amazonaws.com/Prod');
 
-                ws.on('message', async (data) => {
-                    try {
-                        clearTimeout(timeoutId);
-                        const parsedData = JSON.parse(data.toString());
-                        console.log('Cron job received WebSocket data:', parsedData.type);
+            const timeoutId = setTimeout(() => {
+                ws.close();
+                rejectOnce(new Error('WebSocket connection timed out after 20 seconds'));
+            }, 20000);
 
-                        if (parsedData.type === 'weather_update' && parsedData.data) {
-                            ws.close();
-                            resolve(parsedData.data);
-                        } else if (parsedData.type === 'weather_error') {
-                            ws.close();
-                            reject(new Error(`Weather API error: ${parsedData.message}`));
-                        } else {
-                            // Handle other message types or continue waiting
-                            console.log('Received non-weather message:', parsedData.type);
-                        }
-                    } catch (error) {
-                        clearTimeout(timeoutId);
+            ws.onopen = () => {
+                console.log('WebSocket connected from cron job (Edge Runtime)');
+
+                ws.send(JSON.stringify({
+                    action: 'get_weather',
+                    city: 'Paris',
+                    country: 'FR',
+                    timestamp: Math.floor(Date.now() / 1000)
+                }));
+            };
+
+            ws.onmessage = (event) => {
+                try {
+                    clearTimeout(timeoutId);
+                    const data = JSON.parse(event.data);
+                    console.log('WebSocket message received:', data);
+
+                    // Handle API Gateway error responses
+                    if (data.message === 'Forbidden' || data.message === 'Internal server error') {
+                        console.error('API Gateway error:', data);
                         ws.close();
-                        reject(new Error(`Error parsing WebSocket message: ${error.message}`));
+                        rejectOnce(new Error(`API Error: ${data.message}`));
+                        return;
                     }
-                });
 
-                ws.on('error', (error) => {
-                    clearTimeout(timeoutId);
-                    console.error('WebSocket error in cron job:', error);
-                    reject(new Error(`WebSocket error: ${error.message}`));
-                });
+                    // Handle message types
+                    switch (data.type) {
+                        case 'weather_update':
+                            console.log('Weather data updated:', data.data);
+                            ws.close();
+                            resolveOnce(data.data);
+                            break;
 
-                ws.on('close', (code, reason) => {
-                    clearTimeout(timeoutId);
-                    console.log('WebSocket closed in cron job. Code:', code, 'Reason:', reason.toString());
-                    if (code !== 1000) { // 1000 = normal closure
-                        reject(new Error(`WebSocket closed unexpectedly. Code: ${code}, Reason: ${reason.toString()}`));
+                        case 'weather_error':
+                            console.error('Weather fetch error:', data.message);
+                            ws.close();
+                            rejectOnce(new Error(data.message));
+                            break;
+
+                        case 'test':
+                        case 'broadcast':
+                        case 'echo':
+                        default:
+                            console.log('Received non-weather message:', data.type);
+                            break;
                     }
-                });
+                } catch (error) {
+                    clearTimeout(timeoutId);
+                    ws.close();
+                    rejectOnce(new Error(`Error parsing message: ${error.message}`));
+                }
+            };
 
-            }).catch(reject);
+            ws.onerror = (error) => {
+                clearTimeout(timeoutId);
+                console.error('WebSocket error in cron job:', error);
+                rejectOnce(new Error(`WebSocket error: ${error.message || 'Connection failed'}`));
+            };
+
+            ws.onclose = (event) => {
+                clearTimeout(timeoutId);
+                console.log('WebSocket closed in cron job. Code:', event.code, 'Reason:', event.reason);
+                if (event.code !== 1000 && event.code !== 1005 && !isResolved) {
+                    rejectOnce(new Error(`WebSocket closed unexpectedly. Code: ${event.code}`));
+                }
+            };
         });
 
         // Store the weather data in Redis
@@ -79,7 +112,7 @@ export async function GET(request) {
         return Response.json({
             success: true,
             timestamp: new Date().toISOString(),
-            message: 'Weather data updated successfully via WebSocket',
+            message: 'Weather data updated successfully via WebSocket (Edge Runtime)',
             location: weatherData.location
         });
 
