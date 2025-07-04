@@ -1,0 +1,15 @@
+{
+  "requestContext": {
+    "connectionId": "test-connection-12345",
+    "eventType": "MESSAGE",
+    "requestId": "test-request-message-123",
+    "domainName": "your-websocket-api.execute-api.eu-north-1.amazonaws.com",
+    "stage": "Prod",
+    "apiId": "test-api-id"
+  },
+  "body": "{\"action\": \"sendMessage\", \"message\": \"Hello from test!\"}",
+  "headers": {
+    "Host": "your-websocket-api.execute-api.eu-north-1.amazonaws.com"
+  },
+  "isBase64Encoded": false
+}

@@ -1,0 +1,15 @@
+{
+  "requestContext": {
+    "connectionId": "test-connection-12345",
+    "eventType": "CONNECT",
+    "requestId": "test-request-connect-123",
+    "domainName": "your-websocket-api.execute-api.eu-north-1.amazonaws.com",
+    "stage": "Prod",
+    "apiId": "test-api-id"
+  },
+  "headers": {
+    "Host": "your-websocket-api.execute-api.eu-north-1.amazonaws.com",
+    "User-Agent": "Test-Agent"
+  },
+  "isBase64Encoded": false
+}
