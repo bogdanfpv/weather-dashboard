@@ -14,10 +14,10 @@ jobs:
       - name: Install AWS SAM CLI
         run: pip install aws-sam-cli
       - name: Validate SAM template
-        run: sam validate --config-file backend/sam-app/samconfig.toml
+        run: sam validate --config-file samconfig.toml
         working-directory: backend/sam-app
       - name: Build SAM app
-        run: sam build --config-file backend/sam-app/samconfig.toml
+        run: sam build --config-file samconfig.toml
         working-directory: backend/sam-app
       # - name: Run tests (add if you write tests)
       #   run: pytest
