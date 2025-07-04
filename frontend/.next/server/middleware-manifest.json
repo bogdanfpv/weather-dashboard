@@ -1,6 +1,36 @@
 {
   "version": 3,
   "middleware": {},
-  "functions": {},
+  "functions": {
+    "/api/update-weather/route": {
+      "files": [
+        "server/server-reference-manifest.js",
+        "server/app/api/update-weather/route_client-reference-manifest.js",
+        "server/middleware-build-manifest.js",
+        "server/middleware-react-loadable-manifest.js",
+        "server/next-font-manifest.js",
+        "server/interception-route-rewrite-manifest.js",
+        "server/edge-runtime-webpack.js",
+        "server/app/api/update-weather/route.js"
+      ],
+      "name": "app/api/update-weather/route",
+      "page": "/api/update-weather/route",
+      "matchers": [
+        {
+          "regexp": "^/api/update\\-weather$",
+          "originalSource": "/api/update-weather"
+        }
+      ],
+      "wasm": [],
+      "assets": [],
+      "env": {
+        "__NEXT_BUILD_ID": "-fNPtFWql0P-GKo9Rf5RX",
+        "NEXT_SERVER_ACTIONS_ENCRYPTION_KEY": "mbJceZn1e4LD0PFrIWwbuWFnXga230hdhfOkBng+sEY=",
+        "__NEXT_PREVIEW_MODE_ID": "bcdcfa103963439ec6017abf91496c11",
+        "__NEXT_PREVIEW_MODE_ENCRYPTION_KEY": "87efcdcfe7df3e019bf1ee9ce1a99d9236cf5c112534074f490091c4585dfa9b",
+        "__NEXT_PREVIEW_MODE_SIGNING_KEY": "d77eceffc5577276923d125e2547ff805415db95fec573812fa5be3adf2c563e"
+      }
+    }
+  },
   "sortedMiddleware": []
 }

@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useState, useEffect, useRef } from 'react';
-import { Sun, Cloud, CloudRain, CloudSnow, Wind, Eye, Droplets, Thermometer, Sunrise, Sunset, RefreshCw, Loader2 } from 'lucide-react';
+import { Menu, Sun, Cloud, CloudRain, CloudSnow, Wind, Eye, Droplets, Thermometer, Sunrise, Sunset, RefreshCw, Loader2 } from 'lucide-react';
 import WeatherStats from './WeatherStats';
 import WeatherIcon from './WeatherIcon';
 import { Bell, X } from 'lucide-react';
@@ -49,6 +49,7 @@ const WeatherApp = () => {
     const [currentTime, setCurrentTime] = useState('');
     const [lastUpdated, setLastUpdated] = useState('');
     const [isClient, setIsClient] = useState(false);
+    const [isSidebarOpen, setIsSidebarOpen] = useState(false);
 
     // WebSocket hook with weather functionality
     const {
@@ -91,7 +92,7 @@ const WeatherApp = () => {
         setIsClient(true);
 
         const updateTime = () => {
-            const now = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+            const now = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: true });
             setCurrentTime(now);
             if (!lastUpdated) {
                 setLastUpdated(now);
@@ -187,20 +188,65 @@ const WeatherApp = () => {
     };
 
     return (
-        <div className="min-h-screen bg-gradient-to-b from-blue-500 via-blue-600 to-blue-800">
+        <div className=" flex min-h-screen bg-gradient-to-b from-blue-500 via-blue-600 to-blue-800">
             <NotificationPanel />
+            {/* Backdrop overlay */}
+            {isSidebarOpen && (
+                <div
+                    className="fixed inset-0 bg-black/50 z-40"
+                    onClick={() => setIsSidebarOpen(false)}
+                />
+            )}
+            {/* Sidebar */}
+            <div className={`
+                fixed inset-y-0 left-0 z-50 w-64 bg-white/10 backdrop-blur-md border-r border-white/20 p-6 transform transition-transform duration-300 ease-in-out
+                ${isSidebarOpen ? 'translate-x-0' : '-translate-x-full'}
+            `}>
+                <div className="flex items-center justify-between mb-6">
+                    <h2 className="text-lg font-bold text-white">WeatherApp</h2>
+                    <button
+                        onClick={() => setIsSidebarOpen(false)}
+                        className="lg:hidden text-white hover:bg-white/20 p-1 rounded"
+                    >
+                        <X className="w-5 h-5" />
+                    </button>
+                </div>
+                <nav className="space-y-2">
+                    <a href="#" className="block text-white hover:bg-white/20 px-3 py-2 rounded-lg transition-colors">
+                        Dashboard
+                    </a>
+                    <a href="#" className="block text-white hover:bg-white/20 px-3 py-2 rounded-lg transition-colors">
+                        Forecast
+                    </a>
+                    <a href="#" className="block text-white hover:bg-white/20 px-3 py-2 rounded-lg transition-colors">
+                        Settings
+                    </a>
+                </nav>
+            </div>
             <div className="container mx-auto px-4 py-6 max-w-6xl">
 
                 {/* Header */}
                 <header className="text-center mb-6">
-                    <div className="flex items-center justify-center space-x-2 mb-2">
-                        <h1 className="text-white text-2xl md:text-3xl font-light">
-                            {weatherData.location}
-                            {/* Only show time after client hydration to prevent mismatch */}
-                            {isClient && currentTime && ` • ${currentTime}`}
-                        </h1>
-                        <div className={`w-2 h-2 rounded-full ${isConnected ? 'bg-green-400' : 'bg-red-400'}`}
-                             title={isConnected ? 'Live updates connected' : 'Live updates disconnected'} />
+                    <div className="flex items-center justify-between mb-4">
+                        {/* Hamburger menu button */}
+                        <button
+                            onClick={() => setIsSidebarOpen(true)}
+                            className="text-white hover:bg-white/20 p-2 rounded-lg transition-colors"
+                        >
+                            <Menu className="w-6 h-6" />
+                        </button>
+
+                        <div className="flex items-center justify-center space-x-2 flex-1">
+                            <h1 className="text-white text-2xl md:text-3xl font-light">
+                                {weatherData.location}
+                                {isClient && currentTime && ` • ${currentTime}`}
+                            </h1>
+                            <div className={`w-2 h-2 rounded-full ${isConnected ? 'bg-green-400' : 'bg-red-400'}`}
+                                 title={isConnected ? 'Live updates connected' : 'Live updates disconnected'} />
+                        </div>
+
+                        {/* Empty div for balance */}
+                        <div className="w-10"></div>
                     </div>
                     <p className="text-blue-100 text-sm">{weatherData.date}</p>
                 </header>
