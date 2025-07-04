@@ -1,5 +1,5 @@
-name: Run Tests
-run-name: ${{ github.actor }} is running tests
+name: Run Frontend Tests
+run-name: ${{ github.actor }} is running Frontend tests
 on: [push]
 jobs:
   test:
