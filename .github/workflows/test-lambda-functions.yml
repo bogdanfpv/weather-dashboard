@@ -32,14 +32,17 @@ jobs:
         run: |
           cd backend/sam-app
           sam build
+        working-directory: backend/sam-app
 
       - name: Run tests
         run: |
           cd backend/sam-app
           python test_all_functions.py
+        working-directory: backend/sam-app
 
       - name: Run SAM local tests (optional)
         run: |
           cd backend/sam-app
           # You can add sam local invoke tests here if needed
           echo "SAM local tests would go here"
+        working-directory: backend/sam-app
