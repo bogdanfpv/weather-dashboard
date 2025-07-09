@@ -175,37 +175,45 @@ def lambda_handler(event, context):
 def handle_weather_request(apigw_client, connection_id, city, country):
     """Handle weather data request and broadcast to all clients"""
     try:
+        # Rate limit check
+        last_update = get_last_update_time()
+        now = int(time.time())
+        if last_update and now - last_update < RATE_LIMIT_MINUTES * 60:
+            next_update_time = last_update + RATE_LIMIT_MINUTES * 60
+            denial_data = {
+                'type': 'weather_request_denied',
+                'message': 'Weather update request denied. Please wait before requesting again.',
+                'nextUpdateTime': next_update_time,
+                'timestamp': now
+            }
+            apigw_client.post_to_connection(
+                ConnectionId=connection_id,
+                Data=json.dumps(denial_data)
+            )
+            return {
+                'statusCode': 429,
+                'body': json.dumps('Rate limit active')
+            }
+
         # Fetch weather data
         weather_data = fetch_weather_data(city, country)
+        set_last_update_time()  # Update rate limit timestamp
 
         broadcast_data = {
             'type': 'weather_update',
             'data': weather_data,
-            'timestamp': int(time.time()),
+            'timestamp': now,
             'requested_by': connection_id
         }
 
-        try:
-            apigw_client.post_to_connection(
+        apigw_client.post_to_connection(
             ConnectionId=connection_id,
             Data=json.dumps(broadcast_data)
         )
 
-        except apigw_client.exceptions.GoneException:
-            #Connection is stale remove it from DynamoDB
-            table.delete_item(Key={'connectionId': connection_id}
-        except apigw_client.exceptions.LimitExceededException:
-            print(f"Rate limit exceeded: {str(e)}")
-        except Exception as e:
-            print(f"Unexpected error posting to connection{str(e)}")
-
         return {
             'statusCode': 200,
-            'body': json.dumps({
-                'message': 'Weather data fetched and broadcast successfully',
-                'successful_sends': successful_sends,
-                'failed_sends': failed_sends
-            })
+            'body': json.dumps('Weather data fetched and sent')
         }
 
     except Exception as e:
@@ -288,12 +296,12 @@ def broadcast_message(apigw_client, message, sender_id):
         print(f"Error broadcasting message: {str(e)}")
         raise
 
-    def get_last_update_time():
-        try:
-            response = rate_limit_table.get_item(Key={'id': 'last_update'})
-            return response['Item']['timestamp']
-        except KeyError:
-            return None
+def get_last_update_time():
+    try:
+        response = rate_limit_table.get_item(Key={'id': 'last_update'})
+        return response['Item']['timestamp']
+    except KeyError:
+        return None
 
-    def set_last_update_time():
-        rate_limit_table.put_item(Item={'id': 'last_update', 'timestamp': int(time.time())})
+def set_last_update_time():
+    rate_limit_table.put_item(Item={'id': 'last_update', 'timestamp': int(time.time())})

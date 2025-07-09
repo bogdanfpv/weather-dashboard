@@ -112,6 +112,8 @@ const WeatherApp = () => {
     notifications,
     weatherData: liveWeatherData,
     isLoadingWeather,
+    canUpdateWeather,
+    nextUpdateTime,
     clearNotifications,
     requestWeatherUpdate,
   } = useWebSocket(WEBSOCKET_URL);
