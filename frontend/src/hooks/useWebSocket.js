@@ -5,6 +5,8 @@ export function useWebSocket(url) {
     const [notifications, setNotifications] = useState([]);
     const [weatherData, setWeatherData] = useState(null);
     const [isLoadingWeather, setIsLoadingWeather] = useState(false);
+    const [canUpdateWeather, setCanUpdateWeather] = useState(false);
+    const [nextUpdateTime, setNextUpdateTime] = useState(null);
     const wsRef = useRef(null);
     const reconnectTimeoutRef = useRef(null);
 
@@ -17,6 +19,13 @@ export function useWebSocket(url) {
             wsRef.current.onopen = () => {
                 console.log('WebSocket connected');
                 setIsConnected(true);
+
+                // Request current rate limit status on connection
+                sendMessage({
+                    action: 'get_rate_limit_status',
+                    city: 'Paris',
+                    country: 'FR'
+                });
             };
 
             wsRef.current.onmessage = (event) => {
@@ -59,6 +68,46 @@ export function useWebSocket(url) {
                             }, ...prev.slice(0, 9)]);
                             break;
 
+                        case 'rate_limit_status':
+                            console.log('Rate limit status received:', data);
+                            setCanUpdateWeather(data.canUpdate);
+                            setNextUpdateTime(data.nextUpdateTime);
+
+                            if (!data.canUpdate && data.nextUpdateTime) {
+                                setNotifications(prev => [{
+                                    type: 'rate_limit',
+                                    message: `Weather updates available again at ${new Date(data.nextUpdateTime * 1000).toLocaleTimeString()}`,
+                                    timestamp: data.timestamp
+                                }, ...prev.slice(0, 9)]);
+                            }
+                            break;
+
+                        case 'rate_limit_updated':
+                            console.log('Rate limit updated:', data);
+                            setCanUpdateWeather(data.canUpdate);
+                            setNextUpdateTime(data.nextUpdateTime);
+
+                            const message = data.canUpdate
+                                ? 'Weather updates are now available!'
+                                : `Weather updates limited until ${new Date(data.nextUpdateTime * 1000).toLocaleTimeString()}`;
+
+                            setNotifications(prev => [{
+                                type: data.canUpdate ? 'rate_limit_available' : 'rate_limit',
+                                message,
+                                timestamp: data.timestamp
+                            }, ...prev.slice(0, 9)]);
+                            break;
+
+                        case 'weather_request_denied':
+                            console.log('Weather request denied due to rate limit');
+                            setIsLoadingWeather(false);
+                            setNotifications(prev => [{
+                                type: 'error',
+                                message: 'Weather update request denied. Please wait before requesting again.',
+                                timestamp: data.timestamp
+                            }, ...prev.slice(0, 9)]);
+                            break;
+
                         case 'test':
                         case 'broadcast':
                         case 'echo':
@@ -76,6 +125,8 @@ export function useWebSocket(url) {
                 console.log('WebSocket disconnected. Code:', event.code, 'Reason:', event.reason);
                 setIsConnected(false);
                 setIsLoadingWeather(false);
+                setCanUpdateWeather(false);
+                setNextUpdateTime(null);
 
                 // Auto-reconnect after 5 seconds
                 reconnectTimeoutRef.current = setTimeout(connect, 5000);
@@ -85,6 +136,8 @@ export function useWebSocket(url) {
                 console.error('WebSocket error:', error);
                 setIsConnected(false);
                 setIsLoadingWeather(false);
+                setCanUpdateWeather(false);
+                setNextUpdateTime(null);
             };
 
         } catch (error) {
@@ -102,6 +155,8 @@ export function useWebSocket(url) {
         }
         setIsConnected(false);
         setIsLoadingWeather(false);
+        setCanUpdateWeather(false);
+        setNextUpdateTime(null);
     }, []);
 
     const sendMessage = useCallback((message) => {
@@ -132,6 +187,19 @@ export function useWebSocket(url) {
             return false;
         }
 
+        if (!canUpdateWeather) {
+            console.error('Cannot request weather: Rate limit active');
+            const nextUpdateStr = nextUpdateTime
+                ? new Date(nextUpdateTime * 1000).toLocaleTimeString()
+                : 'later';
+            setNotifications(prev => [{
+                type: 'error',
+                message: `Weather updates are rate limited. Try again at ${nextUpdateStr}`,
+                timestamp: Math.floor(Date.now() / 1000)
+            }, ...prev.slice(0, 9)]);
+            return false;
+        }
+
         setIsLoadingWeather(true);
         const success = sendMessage({
             action: 'get_weather',
@@ -145,7 +213,7 @@ export function useWebSocket(url) {
         }
 
         return success;
-    }, [isConnected, sendMessage]);
+    }, [isConnected, canUpdateWeather, nextUpdateTime, sendMessage]);
 
     useEffect(() => {
         connect();
@@ -161,6 +229,8 @@ export function useWebSocket(url) {
         notifications,
         weatherData,
         isLoadingWeather,
+        canUpdateWeather,
+        nextUpdateTime,
         clearNotifications,
         sendMessage,
         requestWeatherUpdate

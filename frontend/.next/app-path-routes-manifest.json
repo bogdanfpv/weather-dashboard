@@ -1,6 +1,6 @@
 {
-  "/_not-found/page": "/_not-found",
   "/api/get-cached-weather/route": "/api/get-cached-weather",
+  "/_not-found/page": "/_not-found",
   "/page": "/",
   "/api/update-weather/route": "/api/update-weather"
 }

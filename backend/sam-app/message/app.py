@@ -8,6 +8,10 @@ from datetime import datetime
 dynamodb = boto3.resource('dynamodb')
 table = dynamodb.Table(os.environ['CONNECTIONS_TABLE'])
 
+RATE_LIMIT_TABLE = os.environ.get('RATE_LIMIT_TABLE', 'WeatherRateLimit')
+rate_limit_table = dynamodb.Table(RATE_LIMIT_TABLE)
+RATE_LIMIT_MINUTES = 45
+
 # Add your OpenWeatherMap API key as an environment variable
 OPENWEATHER_API_KEY = os.environ.get('OPENWEATHER_API_KEY', '60aca708ebaceefe441a9aa0e5a77717')
 
@@ -124,6 +128,30 @@ def lambda_handler(event, context):
         message_data = body.get('data', 'Hello from WebSocket!')
 
         apigw_client = get_apigw_client(event)
+
+        if message_type == 'get_rate_limit_status':
+            last_update = get_last_update_time()
+            now = int(time.time())
+            can_update = True
+            next_update_time = None
+            if last_update and now - last_update < RATE_LIMIT_MINUTES * 60:
+                can_update = False
+                next_update_time = last_update + RATE_LIMIT_MINUTES * 60
+
+            rate_limit_data = {
+                'type': 'rate_limit_status',
+                'canUpdate': can_update,
+                'nextUpdateTime': next_update_time,
+                'timestamp': now
+            }
+            apigw_client.post_to_connection(
+                ConnectionId=connection_id,
+                Data=json.dumps(rate_limit_data)
+            )
+            return {
+                'statusCode': 200,
+                'body': json.dumps('Rate limit status sent')
+            }
 
         if message_type == 'get_weather':
             # Fetch weather data and broadcast to all clients
@@ -259,3 +287,13 @@ def broadcast_message(apigw_client, message, sender_id):
     except Exception as e:
         print(f"Error broadcasting message: {str(e)}")
         raise
+
+    def get_last_update_time():
+        try:
+            response = rate_limit_table.get_item(Key={'id': 'last_update'})
+            return response['Item']['timestamp']
+        except KeyError:
+            return None
+
+    def set_last_update_time():
+        rate_limit_table.put_item(Item={'id': 'last_update', 'timestamp': int(time.time())})
