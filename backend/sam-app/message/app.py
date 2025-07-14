@@ -4,17 +4,27 @@ import os
 import time
 import requests
 from datetime import datetime
+from decimal import Decimal
+from urllib.parse import quote
+import requests
+
+class DecimalEncoder(json.JSONEncoder):
+    def default(self, obj):
+        if isinstance(obj, Decimal):
+            return float(obj)  # Convert Decimal to float
+        return super(DecimalEncoder, self).default(obj)
 
 dynamodb = boto3.resource('dynamodb')
 table = dynamodb.Table(os.environ['CONNECTIONS_TABLE'])
+DEBUG_MODE = os.environ.get('DEBUG_MODE', 'false').lower() == 'true'
 
 RATE_LIMIT_TABLE = os.environ.get('RATE_LIMIT_TABLE', 'WeatherRateLimit')
 rate_limit_table = dynamodb.Table(RATE_LIMIT_TABLE)
-RATE_LIMIT_MINUTES = 45
+RATE_LIMIT_MINUTES = 1
 
 OPENWEATHER_API_KEY = os.environ.get('OPENWEATHER_API_KEY')
 if not OPENWEATHER_API_KEY:
-    raise RuntimeError('OPENWEATHER_API_KEY environment variable is not set
+    raise RuntimeError('OPENWEATHER_API_KEY environment variable is not set')
 
 def get_apigw_client(event):
     endpoint = f"https://{event['requestContext']['domainName']}/{event['requestContext']['stage']}"
@@ -52,7 +62,7 @@ def fetch_weather_data(city="Paris", country="FR"):
                 "high": round(current_data['main']['temp_max']),
                 "low": round(current_data['main']['temp_min']),
                 "wind": f"{round(current_data['wind']['speed'])}km/h",
-                "sky": f"{current_data['weather'][0][main]}",
+                "sky": f"{current_data['weather'][0]['main']}",
                 "sunrise": datetime.fromtimestamp(current_data['sys']['sunrise']).strftime("%H:%M"),
                 "sunset": datetime.fromtimestamp(current_data['sys']['sunset']).strftime("%H:%M"),
                 "visibility": f"{current_data.get('visibility', 10000) / 1000}km",
@@ -147,11 +157,11 @@ def lambda_handler(event, context):
             }
             apigw_client.post_to_connection(
                 ConnectionId=connection_id,
-                Data=json.dumps(rate_limit_data)
+                Data=json.dumps(rate_limit_data, cls=DecimalEncoder)
             )
             return {
                 'statusCode': 200,
-                'body': json.dumps('Rate limit status sent')
+                'body': json.dumps('Rate limit status sent', cls=DecimalEncoder)
             }
 
         if message_type == 'get_weather':
@@ -168,9 +178,13 @@ def lambda_handler(event, context):
 
     except Exception as e:
         print(f"Error handling message from {connection_id}: {str(e)}")
+        error_message = 'Failed to handle message'
+        if DEBUG_MODE:
+            error_message += f': {str(e)}'
+
         return {
             'statusCode': 500,
-            'body': json.dumps('Failed to handle message')
+            'body': json.dumps(error_message, cls=DecimalEncoder)
         }
 
 def handle_weather_request(apigw_client, connection_id, city, country):
@@ -189,16 +203,16 @@ def handle_weather_request(apigw_client, connection_id, city, country):
             }
             apigw_client.post_to_connection(
                 ConnectionId=connection_id,
-                Data=json.dumps(denial_data)
+                Data=json.dumps(denial_data, cls=DecimalEncoder)
             )
             return {
                 'statusCode': 429,
-                'body': json.dumps('Rate limit active')
+                'body': json.dumps('Rate limit active', cls=DecimalEncoder)
             }
 
-        # Fetch weather data
         weather_data = fetch_weather_data(city, country)
-        set_last_update_time()  # Update rate limit timestamp
+        set_last_update_time()
+        update_redis(weather_data)
 
         broadcast_data = {
             'type': 'weather_update',
@@ -209,57 +223,35 @@ def handle_weather_request(apigw_client, connection_id, city, country):
 
         apigw_client.post_to_connection(
             ConnectionId=connection_id,
-            Data=json.dumps(broadcast_data)
+            Data=json.dumps(broadcast_data, cls=DecimalEncoder)
         )
 
         return {
             'statusCode': 200,
-            'body': json.dumps('Weather data fetched and sent')
+            'body': json.dumps('Weather data fetched and sent', cls=DecimalEncoder)
         }
 
     except Exception as e:
         print(f"Error handling weather request: {str(e)}")
         # Send error message back to requester
         try:
+            error_message = str(e) if DEBUG_MODE else "An error occurred processing your request"
             error_data = {
                 'type': 'weather_error',
-                'message': f'Failed to fetch weather data: {str(e)}',
+                'message': f'Failed to fetch weather data: {error_message}',
                 'timestamp': int(time.time())
             }
             apigw_client.post_to_connection(
                 ConnectionId=connection_id,
-                Data=json.dumps(error_data)
+                Data=json.dumps(error_data, cls=DecimalEncoder)
             )
-        except:
-            pass
+        except Exception as inner_e:
+            print(f"Error sending error message: {str(inner_e)}")
 
         return {
             'statusCode': 500,
-            'body': json.dumps(f'Weather request failed: {str(e)}')
+            'body': json.dumps('Weather request failed', cls=DecimalEncoder)
         }
-
-def echo_message(apigw_client, connection_id, message):
-    """Send message back to the sender"""
-    try:
-        response_data = {
-            'type': 'echo',
-            'message': message,
-            'timestamp': int(time.time())
-        }
-
-        apigw_client.post_to_connection(
-            ConnectionId=connection_id,
-            Data=json.dumps(response_data)
-        )
-
-        return {
-            'statusCode': 200,
-            'body': json.dumps('Message echoed successfully')
-        }
-
-    except Exception as e:
-        print(f"Error echoing message to {connection_id}: {str(e)}")
-        raise
 
 def broadcast_message(apigw_client, message, sender_id):
     """Send message to all connected clients"""
@@ -281,7 +273,7 @@ def broadcast_message(apigw_client, message, sender_id):
             try:
                 apigw_client.post_to_connection(
                     ConnectionId=connection_id,
-                    Data=json.dumps(broadcast_data)
+                    Data=json.dumps(broadcast_data, cls=DecimalEncoder)
                 )
             except apigw_client.exceptions.GoneException:
                 # Connection is stale, remove it
@@ -290,7 +282,7 @@ def broadcast_message(apigw_client, message, sender_id):
 
         return {
             'statusCode': 200,
-            'body': json.dumps(f'Message broadcast to {len(connections)} connections')
+            'body': json.dumps(f'Message broadcast to {len(connections)} connections', cls=DecimalEncoder)
         }
 
     except Exception as e:
@@ -306,3 +298,87 @@ def get_last_update_time():
 
 def set_last_update_time():
     rate_limit_table.put_item(Item={'id': 'last_update', 'timestamp': int(time.time())})
+
+def echo_message(apigw_client, connection_id, message_data):
+    """Echo message back to sender"""
+    try:
+        echo_data = {
+            'type': 'echo',
+            'message': message_data,
+            'timestamp': int(time.time())
+        }
+
+        apigw_client.post_to_connection(
+            ConnectionId=connection_id,
+            Data=json.dumps(echo_data, cls=DecimalEncoder)
+        )
+
+        return {
+            'statusCode': 200,
+            'body': json.dumps('Message echoed back', cls=DecimalEncoder)
+        }
+
+    except Exception as e:
+        print(f"Error echoing message: {str(e)}")
+        error_message = 'Failed to echo message'
+        if DEBUG_MODE:
+            error_message += f': {str(e)}'
+
+        return {
+            'statusCode': 500,
+            'body': json.dumps(error_message, cls=DecimalEncoder)
+        }
+
+def update_redis(weather_data):
+    """Update Upstash Redis with the latest weather data"""
+    try:
+        # Get Redis credentials from environment variables
+        redis_url = os.environ.get('UPSTASH_REDIS_REST_URL')
+        redis_token = os.environ.get('UPSTASH_REDIS_REST_TOKEN')
+
+        if not redis_url or not redis_token:
+            print("Redis credentials not configured, skipping Redis update")
+            return False
+
+        # Prepare headers for Upstash REST API
+        headers = {
+            "Authorization": f"Bearer {redis_token}",
+            "Content-Type": "application/json"
+        }
+
+        print(f"Updating Redis at URL: {redis_url}")
+
+        # Store weather data using proper Upstash REST API format
+        weather_payload = ["SET", "latest_weather", json.dumps(weather_data)]
+        weather_response = requests.post(
+            redis_url,
+            headers=headers,
+            json=weather_payload,
+            timeout=10
+        )
+
+        # Store last updated timestamp using proper Upstash REST API format
+        timestamp = datetime.now().isoformat()
+        timestamp_payload = ["SET", "last_updated", timestamp]
+        timestamp_response = requests.post(
+            redis_url,
+            headers=headers,
+            json=timestamp_payload,
+            timeout=10
+        )
+
+        print(f"Redis update responses - Weather: {weather_response.status_code}, Data: {weather_response.text}")
+        print(f"Redis timestamp responses - Status: {timestamp_response.status_code}, Data: {timestamp_response.text}")
+
+        if weather_response.status_code == 200 and timestamp_response.status_code == 200:
+            print("Successfully updated Redis with weather data and timestamp")
+            return True
+        else:
+            print(f"Failed to update Redis - Weather: {weather_response.text}, Timestamp: {timestamp_response.text}")
+            return False
+
+    except Exception as e:
+        print(f"Error updating Redis: {str(e)}")
+        import traceback
+        print(traceback.format_exc())
+        return False

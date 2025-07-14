@@ -102,7 +102,7 @@ export async function GET(request) {
             };
         });
 
-        // Store the weather data in Redis
+        // Store the weather data in Redis with better error handling
         await storeWeatherData(weatherData);
 
         // Trigger revalidation of your static pages
@@ -121,22 +121,37 @@ export async function GET(request) {
         return Response.json({
             success: false,
             message: error.message,
-            timestamp: new Date().toISOString()
+            timestamp: new Date().toISOString(),
+            stack: error.stack // Add stack trace for debugging
         }, { status: 500 });
     }
 }
 
-// Helper function to store weather data in Redis
+// Helper function to store weather data in Redis with better error handling
 async function storeWeatherData(data) {
     try {
+        console.log('Attempting to connect to Redis...');
+
+        // Check if environment variables exist
+        if (!process.env.UPSTASH_REDIS_REST_URL || !process.env.UPSTASH_REDIS_REST_TOKEN) {
+            throw new Error('Redis environment variables not found. Please check UPSTASH_REDIS_REST_URL and UPSTASH_REDIS_REST_TOKEN');
+        }
+
         const redis = Redis.fromEnv();
 
+        console.log('Redis client created, storing weather data...');
+
+        // Store weather data
         await redis.set('latest_weather', JSON.stringify(data));
         await redis.set('last_updated', new Date().toISOString());
 
         console.log('Weather data stored successfully in Redis');
     } catch (error) {
-        console.error('Failed to store weather data in Redis:', error);
+        console.error('Failed to store weather data in Redis:', error.message);
+        console.error('Error stack:', error.stack);
         throw error;
     }
 }
+
+// Alternative version using Node.js runtime if Edge Runtime continues to have issues
+// export const runtime = 'nodejs'; // Uncomment this line if you need to switch to Node.js runtime

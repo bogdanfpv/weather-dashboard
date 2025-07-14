@@ -2,9 +2,17 @@ import json
 import boto3
 import os
 import time
+from decimal import Decimal
+
+class DecimalEncoder(json.JSONEncoder):
+    def default(self, obj):
+        if isinstance(obj, Decimal):
+            return float(obj)  # Convert Decimal to float
+        return super(DecimalEncoder, self).default(obj)
 
 dynamodb = boto3.resource('dynamodb')
 table = dynamodb.Table(os.environ['CONNECTIONS_TABLE'])
+DEBUG_MODE = os.environ.get('DEBUG_MODE', 'false').lower() == 'true'
 
 def lambda_handler(event, context):
     connection_id = event['requestContext']['connectionId']
@@ -30,7 +38,7 @@ def lambda_handler(event, context):
                     'type': 'test',
                     'message': 'Welcome! This is a test message.',
                     'timestamp': int(time.time())
-                })
+                }, cls=DecimalEncoder)
             )
         except Exception as msg_error:
             # Log but don't fail the connection
@@ -38,12 +46,16 @@ def lambda_handler(event, context):
 
         return {
             'statusCode': 200,
-            'body': json.dumps('Connected successfully')
+            'body': json.dumps('Connected successfully', cls=DecimalEncoder)
         }
 
     except Exception as e:
         print(f"Error storing connection {connection_id}: {str(e)}")
+        error_message = 'Failed to connect'
+        if DEBUG_MODE:
+            error_message += f': {str(e)}'
+
         return {
             'statusCode': 500,
-            'body': json.dumps('Failed to connect')
+            'body': json.dumps(error_message, cls=DecimalEncoder)
         }

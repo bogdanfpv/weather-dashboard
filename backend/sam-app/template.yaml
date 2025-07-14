@@ -15,7 +15,10 @@ Globals:
     Environment:
       Variables:
         CONNECTIONS_TABLE: !Ref ConnectionsTable
-        RATE_LIMIT_TABLE: 'WeatherRateLimitTable'
+        RATE_LIMIT_TABLE: !Ref RateLimitTable
+        DEBUG_MODE: 'true'
+        UPSTASH_REDIS_REST_URL: 'https://game-stingray-12658.upstash.io'
+        UPSTASH_REDIS_REST_TOKEN: 'ATFyAAIjcDEzNDViNTk3OGQ4ODY0Yjk3YjA5MzQwYTQ5MTdlYjNkZnAxMA'
 
 Resources:
   # DynamoDB table to store active WebSocket connections
@@ -33,6 +36,19 @@ Resources:
       TimeToLiveSpecification:
         AttributeName: ttl
         Enabled: true
+
+  # DynamoDB table for rate limiting
+  RateLimitTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: weather-rate-limit
+      AttributeDefinitions:
+        - AttributeName: id
+          AttributeType: S
+      KeySchema:
+        - AttributeName: id
+          KeyType: HASH
+      BillingMode: PAY_PER_REQUEST
 
   # WebSocket API
   WeatherWebSocketApi:
@@ -77,6 +93,8 @@ Resources:
       Policies:
         - DynamoDBCrudPolicy:
             TableName: !Ref ConnectionsTable
+        - DynamoDBCrudPolicy:
+            TableName: !Ref RateLimitTable
         - Statement:
             - Effect: Allow
               Action:

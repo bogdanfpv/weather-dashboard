@@ -11,6 +11,7 @@ export function useWebSocket(url, { defaultCity = 'Paris', defaultCountry = 'FR'
     const reconnectTimeoutRef = useRef(null);
 
     const connect = useCallback(() => {
+        // Don't connect if URL is null or WebSocket is already open
         if (!url || wsRef.current?.readyState === WebSocket.OPEN) return;
 
         try {
@@ -225,9 +226,13 @@ export function useWebSocket(url, { defaultCity = 'Paris', defaultCountry = 'FR'
     }, [isConnected, canUpdateWeather, nextUpdateTime, sendMessage]);
 
     useEffect(() => {
-        connect();
+        if (url) {
+            connect();
+        } else {
+            disconnect();
+        }
         return disconnect;
-    }, [connect, disconnect]);
+    }, [url, connect, disconnect]);
 
     const clearNotifications = useCallback(() => {
         setNotifications([]);

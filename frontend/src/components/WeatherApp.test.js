@@ -1,47 +1,16 @@
 import React from 'react';
-import { render, screen, waitFor } from '@testing-library/react';
+import { render, screen, waitFor, fireEvent, within } from '@testing-library/react';
 import { renderHook, act } from '@testing-library/react';
 import WeatherApp from './WeatherApp';
 import { useWebSocket } from '../hooks/useWebSocket';
 
 // Setup fetch mock before any imports that might use it
-global.fetch = jest.fn(() =>
-    Promise.resolve({
-        ok: false,
-        json: () => Promise.resolve({})
-    })
-);
-
-// Mock the WeatherStats and WeatherIcon components
-jest.mock('./WeatherStats', () => {
-    return function MockWeatherStats({ weatherData }) {
-        return (
-            <div data-testid="weather-stats">
-                <div>Details</div>
-                <div>Sun Times</div>
-                <div>{weatherData.current.visibility}</div>
-                <div>{weatherData.current.humidity}</div>
-                <div>{weatherData.current.pressure}</div>
-                <div>{weatherData.current.uvIndex}</div>
-                <div>{weatherData.current.sunrise}</div>
-                <div>{weatherData.current.sunset}</div>
-            </div>
-        );
-    };
-});
-
-jest.mock('./WeatherIcon', () => {
-    return function MockWeatherIcon({ condition, size }) {
-        return <div data-testid={`weather-icon-${condition}`} className={size} />;
-    };
-});
+global.fetch = jest.fn();
 
 // Mock the useWebSocket hook
 jest.mock('../hooks/useWebSocket');
 
-// Mock fetch for cached weather data
-// (Already set up above before imports)
-
+// Mock WebSocket
 class MockWebSocket {
     constructor(url) {
         this.url = url;
@@ -66,27 +35,87 @@ MockWebSocket.OPEN = 1;
 
 global.WebSocket = MockWebSocket;
 
+// Mock weather data
+const mockWeatherData = {
+    location: "Paris, FR",
+    date: "Monday 29 August",
+    current: {
+        temp: 21,
+        condition: "Mostly sunny",
+        high: 23,
+        low: 14,
+        wind: "7km/h",
+        sky: "clear",
+        sunrise: "06:48",
+        sunset: "19:58",
+        visibility: "10.0km",
+        humidity: "56%",
+        pressure: "1023mb",
+        uvIndex: "7"
+    },
+    hourly: [
+        { time: "3am", temp: 16, icon: "clear" },
+        { time: "6am", temp: 18, icon: "clear" },
+        { time: "9am", temp: 20, icon: "clear" },
+        { time: "12pm", temp: 22, icon: "clear" },
+        { time: "3pm", temp: 23, icon: "clear" },
+        { time: "6pm", temp: 21, icon: "clear" },
+        { time: "9pm", temp: 19, icon: "clear" }
+    ],
+    daily: [
+        { day: "Tue", date: "30/8", low: 15, high: 21, wind: "8km/h", rain: "10%", icon: "clear" },
+        { day: "Wed", date: "31/8", low: 16, high: 18, wind: "6km/h", rain: "20%", icon: "cloudy" },
+        { day: "Thu", date: "1/9", low: 14, high: 15, wind: "19km/h", rain: "65%", icon: "rain" },
+        { day: "Fri", date: "2/9", low: 13, high: 19, wind: "6km/h", rain: "5%", icon: "clear" },
+        { day: "Sat", date: "3/9", low: 15, high: 22, wind: "4km/h", rain: "0%", icon: "clear" }
+    ]
+};
+
+// Helper function to setup successful fetch mock
+const setupSuccessfulFetch = () => {
+    global.fetch.mockResolvedValue({
+        ok: true,
+        json: jest.fn().mockResolvedValue({
+            data: mockWeatherData,
+            lastUpdated: new Date().toISOString()
+        })
+    });
+};
+
+// Helper function to setup default useWebSocket mock
+const setupDefaultWebSocketMock = () => {
+    useWebSocket.mockReturnValue({
+        isConnected: false,
+        notifications: [],
+        weatherData: null,
+        isLoadingWeather: false,
+        canUpdateWeather: true,
+        nextUpdateTime: null,
+        clearNotifications: jest.fn(),
+        requestWeatherUpdate: jest.fn()
+    });
+};
+
+// Helper function to wait for component to load
+const waitForComponentToLoad = async () => {
+    await waitFor(() => {
+        expect(screen.queryByText('Loading weather data...')).not.toBeInTheDocument();
+    }, { timeout: 3000 });
+
+    await waitFor(() => {
+        expect(screen.getByTestId('location-display')).toBeInTheDocument();
+    }, { timeout: 3000 });
+};
+
 describe('WeatherApp', () => {
     beforeEach(() => {
         // Reset mocks
         jest.clearAllMocks();
         MockWebSocket.mock.instances = [];
 
-        // Mock useWebSocket hook with default values
-        useWebSocket.mockReturnValue({
-            isConnected: false,
-            notifications: [],
-            weatherData: null,
-            isLoadingWeather: false,
-            clearNotifications: jest.fn(),
-            requestWeatherUpdate: jest.fn()
-        });
-
-        // Mock fetch to return proper response structure
-        global.fetch.mockResolvedValue({
-            ok: false,
-            json: jest.fn().mockResolvedValue({})
-        });
+        // Setup default mocks
+        setupDefaultWebSocketMock();
+        setupSuccessfulFetch();
 
         // Mock navigator.wakeLock
         Object.defineProperty(navigator, 'wakeLock', {
@@ -99,54 +128,86 @@ describe('WeatherApp', () => {
         });
     });
 
-    test('renders static UI elements', () => {
+    test('renders loading state initially', async () => {
+        // Mock fetch to return empty response to simulate loading
+        global.fetch.mockResolvedValueOnce({
+            ok: false,
+            json: jest.fn().mockResolvedValue({})
+        });
+
         render(<WeatherApp />);
-        expect(screen.getByText(/Paris, FR/)).toBeInTheDocument();
-        expect(screen.getByText('Monday 29 August')).toBeInTheDocument();
-        expect(screen.getByText(/Today's Weather/)).toBeInTheDocument();
+        expect(screen.getByText('Loading weather data...')).toBeInTheDocument();
+    });
+
+    test('renders weather data after loading', async () => {
+        render(<WeatherApp />);
+
+        await waitForComponentToLoad();
+
+        expect(screen.getByTestId('date-display')).toHaveTextContent('Monday 29 August');
+        expect(screen.getByText("Today's Weather")).toBeInTheDocument();
         expect(screen.getByText(/Next 5 Days/)).toBeInTheDocument();
         expect(screen.getByText(/Live Weather Controls/)).toBeInTheDocument();
-        const mainTemp = screen.getByText(/21°/, { selector: '.text-6xl, .text-7xl' });
-        expect(mainTemp).toBeInTheDocument();
-        expect(screen.getByText(/Mostly sunny/)).toBeInTheDocument();
-        expect(screen.getByText(/Details/)).toBeInTheDocument();
-        expect(screen.getByText(/Sun Times/)).toBeInTheDocument();
+
+        // Check main temperature
+        expect(screen.getByTestId('main-temperature')).toHaveTextContent('21°');
+        expect(screen.getByTestId('weather-condition')).toHaveTextContent('Mostly sunny');
+
+        // Test WeatherStats component content
+        expect(screen.getByText('Weather Stats')).toBeInTheDocument();
+        expect(screen.getByText('Sunrise:')).toBeInTheDocument();
+        expect(screen.getByText('Sunset:')).toBeInTheDocument();
+        expect(screen.getByText('Humidity:')).toBeInTheDocument();
+        expect(screen.getByText('Pressure:')).toBeInTheDocument();
+        expect(screen.getByText('Visibility:')).toBeInTheDocument();
+        expect(screen.getByText('UV Index:')).toBeInTheDocument();
     });
 
-    test('displays current weather static ui and default data', () => {
+    test('displays current weather data correctly', async () => {
         render(<WeatherApp />);
 
-        // Test weather stats labels (using getAllByText to handle duplicates)
-        expect(screen.getAllByText('High').length).toBeGreaterThan(0);
-        expect(screen.getAllByText('Low').length).toBeGreaterThan(0);
-        expect(screen.getAllByText('Wind').length).toBeGreaterThan(0);
-        expect(screen.getAllByText('Sky').length).toBeGreaterThan(0);
+        await waitForComponentToLoad();
 
-        // Test weather values (using getAllByText to handle duplicates)
-        expect(screen.getAllByText('23°').length).toBeGreaterThan(0);
-        expect(screen.getAllByText('14°').length).toBeGreaterThan(0);
-        expect(screen.getAllByText('7km/h').length).toBeGreaterThan(0);
-        expect(screen.getAllByText('clear').length).toBeGreaterThan(0);
+        // Use more specific selectors to find the elements
+        const quickStatsRow = screen.getByTestId('high-temp').parentElement.parentElement;
+
+        // Test weather stats labels within the quick stats row
+        expect(within(quickStatsRow).getByText('High')).toBeInTheDocument();
+        expect(within(quickStatsRow).getByText('Low')).toBeInTheDocument();
+        expect(within(quickStatsRow).getByText('Wind')).toBeInTheDocument();
+        expect(within(quickStatsRow).getByText('Sky')).toBeInTheDocument();
+
+        // Test weather values using testids
+        expect(screen.getByTestId('high-temp')).toHaveTextContent('23°');
+        expect(screen.getByTestId('low-temp')).toHaveTextContent('14°');
+        expect(screen.getByTestId('wind-speed')).toHaveTextContent('7km/h');
+        expect(screen.getByTestId('sky-condition')).toHaveTextContent('clear');
     });
 
-    test('shows 5-day forecast default data', () => {
+    test('shows 5-day forecast data', async () => {
         render(<WeatherApp />);
 
-        // Test that forecast days are present (using getAllByText to handle duplicates)
-        expect(screen.getAllByText('Tue').length).toBeGreaterThan(0);
-        expect(screen.getAllByText('Wed').length).toBeGreaterThan(0);
-        expect(screen.getAllByText('Thu').length).toBeGreaterThan(0);
-        expect(screen.getAllByText('Fri').length).toBeGreaterThan(0);
-        expect(screen.getAllByText('Sat').length).toBeGreaterThan(0);
+        await waitForComponentToLoad();
 
-        // Test some forecast temperatures (using getAllByText to handle duplicates)
-        expect(screen.getAllByText('21°').length).toBeGreaterThan(0);
-        expect(screen.getAllByText('18°').length).toBeGreaterThan(0);
-        expect(screen.getAllByText('15°').length).toBeGreaterThan(0);
+        // Test that forecast days are present - use getAllByText since they appear in mobile and desktop layouts
+        expect(screen.getAllByText('Tue')).toHaveLength(2); // Both mobile and desktop
+        expect(screen.getAllByText('Wed')).toHaveLength(2);
+        expect(screen.getAllByText('Thu')).toHaveLength(2);
+        expect(screen.getAllByText('Fri')).toHaveLength(2);
+        expect(screen.getAllByText('Sat')).toHaveLength(2);
+
+        // Use a more specific selector to find the forecast temperatures
+        // Look for temperatures specifically in the forecast section
+        const forecastSection = screen.getByText(/Next 5 Days/).closest('div');
+        expect(forecastSection).toHaveTextContent('21°');
+        expect(forecastSection).toHaveTextContent('18°');
+        expect(forecastSection).toHaveTextContent('15°');
     });
 
-    test('renders hourly forecast on desktop view', () => {
+    test('renders hourly forecast on desktop view', async () => {
         render(<WeatherApp />);
+
+        await waitForComponentToLoad();
 
         // Test hourly forecast heading
         expect(screen.getByText("Today's Weather")).toBeInTheDocument();
@@ -164,12 +225,13 @@ describe('WeatherApp', () => {
 
         render(<WeatherApp />);
 
-        // Wait for the component to hydrate and show the time
+        await waitForComponentToLoad();
+
+        // Wait for the time to be displayed
         await waitFor(() => {
             const now = fixedDate.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: true });
-            // Use a more specific selector targeting the h1 element
-            const headerElement = screen.getByText(/Paris, FR/);
-            expect(headerElement).toHaveTextContent(now);
+            const locationDisplay = screen.getByTestId('location-display');
+            expect(locationDisplay).toHaveTextContent(now);
         });
 
         jest.useRealTimers();
@@ -181,64 +243,44 @@ describe('WeatherApp', () => {
 
         render(<WeatherApp />);
 
-        // Wait for initial render
+        await waitForComponentToLoad();
+
+        // Wait for initial time display
         await waitFor(() => {
-            const timeText = screen.getByText(/Paris/);
-            expect(timeText).toHaveTextContent('12:00');
+            const locationDisplay = screen.getByTestId('location-display');
+            expect(locationDisplay).toHaveTextContent('12:00');
         });
 
-        // Advance time
+        // Advance time by 60 seconds
         act(() => {
             jest.advanceTimersByTime(60000);
         });
 
-        // Re-query since the DOM may have updated
+        // Check that time has updated
         await waitFor(() => {
-            expect(screen.getByText(/Paris/)).toHaveTextContent('12:01');
+            const locationDisplay = screen.getByTestId('location-display');
+            expect(locationDisplay).toHaveTextContent('12:01');
         });
 
         jest.useRealTimers();
     });
 
-    test('connects and receives weather_update', async () => {
-        const mockWeatherData = {
-            location: "Paris, FR",
-            date: "Monday 29 August",
+    test('handles WebSocket connection and weather updates', async () => {
+        const updatedWeatherData = {
+            ...mockWeatherData,
             current: {
+                ...mockWeatherData.current,
                 temp: 30,
-                condition: "Broken Clouds",
-                high: 28,
-                low: 26,
-                wind: "14mph",
-                rain: "0%",
-                sunrise: "03:48",
-                sunset: "19:58",
-                visibility: "10.0km",
-                humidity: "56%",
-                pressure: "1023mb",
-                uvIndex: "N/A"
-            },
-            hourly: [
-                { time: "06pm", temp: 27, icon: "cloudy" },
-                { time: "09pm", temp: 24, icon: "cloudy" },
-                { time: "12am", temp: 21, icon: "cloudy" },
-                { time: "03am", temp: 20, icon: "clear" },
-                { time: "06am", temp: 23, icon: "cloudy" },
-                { time: "09am", temp: 27, icon: "cloudy" },
-                { time: "12pm", temp: 31, icon: "cloudy" }
-            ],
-            daily: [
-                { day: "Tue", date: "30/8", low: 19, high: 20, wind: "13km/h", rain: "1%", icon: "clear" },
-                { day: "Wed", date: "31/8", low: 8, high: 17, wind: "6km/h", rain: "4%", icon: "cloudy" },
-                { day: "Thu", date: "1/9", low: 7, high: 1, wind: "19km/h", rain: "65%", icon: "rain" },
-                { day: "Fri", date: "2/9", low: 9, high: 19, wind: "6km/h", rain: "6%", icon: "clear" },
-                { day: "Sat", date: "3/9", low: 11, high: 23, wind: "4km/h", rain: "3%", icon: "clear" }
-            ]
+                condition: "Broken Clouds"
+            }
         };
 
-        const { result } = renderHook(() => useWebSocket('ws://test'));
+        // First render with initial data
+        const { rerender } = render(<WeatherApp />);
 
-        // Mock the hook to return connected state and weather data
+        await waitForComponentToLoad();
+
+        // Now mock useWebSocket to return connected state and updated weather data
         useWebSocket.mockReturnValue({
             isConnected: true,
             notifications: [{
@@ -246,77 +288,41 @@ describe('WeatherApp', () => {
                 message: 'Weather data updated for Paris, FR',
                 timestamp: 1751036572
             }],
-            weatherData: mockWeatherData,
+            weatherData: updatedWeatherData,
             isLoadingWeather: false,
+            canUpdateWeather: true,
+            nextUpdateTime: null,
             clearNotifications: jest.fn(),
             requestWeatherUpdate: jest.fn()
         });
 
-        // Re-render with the updated mock
-        const { rerender } = renderHook(() => useWebSocket('ws://test'));
-        rerender();
-
-        // Assert state changes
-        expect(useWebSocket('ws://test').weatherData).toEqual(mockWeatherData);
-        expect(useWebSocket('ws://test').notifications[0].type).toBe('weather_alert');
-        expect(useWebSocket('ws://test').notifications[0].message).toBe('Weather data updated for Paris, FR');
-        expect(useWebSocket('ws://test').isLoadingWeather).toBe(false);
-    });
-
-    test('updates UI after receiving weather_update', async () => {
-        const mockWeatherData = {
-            location: "Paris, FR",
-            date: "Monday 29 August",
-            current: {
-                temp: 30,
-                condition: "Broken Clouds",
-                high: 28,
-                low: 26,
-                wind: "14mph",
-                rain: "0%",
-                sunrise: "03:48",
-                sunset: "19:58",
-                visibility: "10.0km",
-                humidity: "56%",
-                pressure: "1023mb",
-                uvIndex: "N/A"
-            },
-            hourly: [],
-            daily: []
-        };
-
-        // Mock useWebSocket to return the weather data
-        useWebSocket.mockReturnValue({
-            isConnected: true,
-            notifications: [],
-            weatherData: mockWeatherData,
-            isLoadingWeather: false,
-            clearNotifications: jest.fn(),
-            requestWeatherUpdate: jest.fn()
-        });
-
-        render(<WeatherApp />);
+        // Rerender the component with the updated mock
+        rerender(<WeatherApp />);
 
         // Wait for the component to update with the new weather data
         await waitFor(() => {
-            expect(screen.getByText('30°')).toBeInTheDocument();
-            expect(screen.getByText('Broken Clouds')).toBeInTheDocument();
-            expect(screen.getByText('Monday 29 August')).toBeInTheDocument();
+            expect(screen.getByTestId('main-temperature')).toHaveTextContent('30°');
+            expect(screen.getByTestId('weather-condition')).toHaveTextContent('Broken Clouds');
         });
     });
 
-    test('shows connection status correctly', () => {
+    test('shows connection status correctly', async () => {
         // Test disconnected state
         useWebSocket.mockReturnValue({
             isConnected: false,
             notifications: [],
             weatherData: null,
             isLoadingWeather: false,
+            canUpdateWeather: true,
+            nextUpdateTime: null,
             clearNotifications: jest.fn(),
             requestWeatherUpdate: jest.fn()
         });
 
         const { rerender } = render(<WeatherApp />);
+
+        await waitForComponentToLoad();
+
         expect(screen.getByText('Disconnected')).toBeInTheDocument();
 
         // Test connected state
@@ -325,33 +331,70 @@ describe('WeatherApp', () => {
             notifications: [],
             weatherData: null,
             isLoadingWeather: false,
+            canUpdateWeather: true,
+            nextUpdateTime: null,
             clearNotifications: jest.fn(),
             requestWeatherUpdate: jest.fn()
         });
 
         rerender(<WeatherApp />);
-        expect(screen.getByText('Connected')).toBeInTheDocument();
+
+        await waitFor(() => {
+            expect(screen.getByText('Connected')).toBeInTheDocument();
+        });
     });
 
-    test('handles loading state correctly', () => {
+    test('handles loading state correctly', async () => {
         useWebSocket.mockReturnValue({
             isConnected: true,
             notifications: [],
             weatherData: null,
             isLoadingWeather: true,
+            canUpdateWeather: false,
+            nextUpdateTime: null,
             clearNotifications: jest.fn(),
             requestWeatherUpdate: jest.fn()
         });
 
         render(<WeatherApp />);
+
+        await waitForComponentToLoad();
+
+        // Look for the button containing "Updating..." text
         expect(screen.getByText('Updating...')).toBeInTheDocument();
+    });
+
+    test('handles rate limiting correctly', async () => {
+        const nextUpdateTime = Math.floor(Date.now() / 1000) + 300; // 5 minutes from now
+        const expectedTimeString = new Date(nextUpdateTime * 1000).toLocaleTimeString();
+
+        useWebSocket.mockReturnValue({
+            isConnected: true,
+            notifications: [],
+            weatherData: null,
+            isLoadingWeather: false,
+            canUpdateWeather: false,
+            nextUpdateTime: nextUpdateTime,
+            clearNotifications: jest.fn(),
+            requestWeatherUpdate: jest.fn()
+        });
+
+        render(<WeatherApp />);
+
+        await waitForComponentToLoad();
+
+        // Look for the specific time string in the button text
+        expect(screen.getByText(new RegExp(`Available at ${expectedTimeString}`))).toBeInTheDocument();
     });
 
     test('fetches cached weather data on mount', async () => {
         const mockCachedData = {
             data: {
                 location: "London, UK",
-                current: { temp: 15, condition: "Cloudy" }
+                date: "Monday 29 August",
+                current: { temp: 15, condition: "Cloudy" },
+                hourly: [],
+                daily: []
             },
             lastUpdated: new Date().toISOString()
         };
@@ -364,25 +407,157 @@ describe('WeatherApp', () => {
 
         render(<WeatherApp />);
 
-        // Verify fetch was called
+        // Wait for component to load
         await waitFor(() => {
-            expect(global.fetch).toHaveBeenCalledWith('/api/get-cached-weather');
+            expect(screen.queryByText('Loading weather data...')).not.toBeInTheDocument();
         });
+
+        // Verify fetch was called with correct parameters
+        expect(global.fetch).toHaveBeenCalledWith(
+            expect.stringContaining('/api/get-cached-weather'),
+            expect.objectContaining({
+                cache: 'no-store',
+                headers: expect.objectContaining({
+                    'Cache-Control': 'no-cache, no-store, must-revalidate'
+                })
+            })
+        );
     });
 
-    test('handles fetch error gracefully', async () => {
-        // Mock fetch to throw an error
-        global.fetch.mockRejectedValueOnce(new Error('Network error'));
+    test('handles fetch error', async () => {
+        // Clear any existing mocks
+        jest.clearAllMocks();
 
+        // First, we'll create a spy on console.error
         const consoleSpy = jest.spyOn(console, 'error').mockImplementation(() => {});
 
+        // Mock first fetch to throw an error
+        global.fetch.mockRejectedValueOnce(new Error('Network error'));
+
+        // Important: Looking at the component code, after an error it will still
+        // try to render the loading state indefinitely. We need to verify that
+        // the error is logged but we can't expect the loading state to disappear.
         render(<WeatherApp />);
 
-        // Verify error was logged
+        // Wait for the error to be logged
         await waitFor(() => {
             expect(consoleSpy).toHaveBeenCalledWith('Failed to fetch cached weather data:', expect.any(Error));
         });
 
+        // Since we know the component will stay in loading state after the error,
+        // we should verify that the loading state is indeed present
+        expect(screen.getByText('Loading weather data...')).toBeInTheDocument();
+
+        // Clean up
         consoleSpy.mockRestore();
+    }, 5000);
+
+    test('displays notifications correctly', async () => {
+        const mockNotifications = [
+            {
+                type: 'weather_alert',
+                message: 'Weather data updated for Paris, FR',
+                timestamp: 1751036572
+            }
+        ];
+
+        useWebSocket.mockReturnValue({
+            isConnected: true,
+            notifications: mockNotifications,
+            weatherData: null,
+            isLoadingWeather: false,
+            canUpdateWeather: true,
+            nextUpdateTime: null,
+            clearNotifications: jest.fn(),
+            requestWeatherUpdate: jest.fn()
+        });
+
+        render(<WeatherApp />);
+
+        await waitForComponentToLoad();
+
+        expect(screen.getByText('Weather Alert')).toBeInTheDocument();
+        expect(screen.getByText('Weather data updated for Paris, FR')).toBeInTheDocument();
+        expect(screen.getByText('Clear (1)')).toBeInTheDocument();
+    });
+
+    test('handles sidebar toggle', async () => {
+        render(<WeatherApp />);
+
+        await waitForComponentToLoad();
+
+        // Locate the sidebar element by its test ID
+        const sidebar = screen.getByTestId('sidebar');
+
+        // Initially, the sidebar should be closed
+        expect(sidebar).toHaveClass('-translate-x-full');
+
+        // Click the menu button to open the sidebar
+        const menuButton = screen.getByRole('button', { name: /menu/i });
+        fireEvent.click(menuButton);
+
+        // Now, the sidebar should be open
+        expect(sidebar).toHaveClass('translate-x-0');
+    });
+
+    test('handles weather update button click', async () => {
+        const mockRequestWeatherUpdate = jest.fn();
+
+        useWebSocket.mockReturnValue({
+            isConnected: true,
+            notifications: [],
+            weatherData: null,
+            isLoadingWeather: false,
+            canUpdateWeather: true,
+            nextUpdateTime: null,
+            clearNotifications: jest.fn(),
+            requestWeatherUpdate: mockRequestWeatherUpdate
+        });
+
+        render(<WeatherApp />);
+
+        await waitForComponentToLoad();
+
+        // Find and click the update weather button
+        const updateButton = screen.getByRole('button', { name: /update weather/i });
+        fireEvent.click(updateButton);
+
+        expect(mockRequestWeatherUpdate).toHaveBeenCalled();
+    });
+
+    test('handles notification clearing', async () => {
+        const mockClearNotifications = jest.fn();
+
+        useWebSocket.mockReturnValue({
+            isConnected: true,
+            notifications: [
+                {
+                    type: 'weather_alert',
+                    message: 'Test notification',
+                    timestamp: 1751036572
+                }
+            ],
+            weatherData: null,
+            isLoadingWeather: false,
+            canUpdateWeather: true,
+            nextUpdateTime: null,
+            clearNotifications: mockClearNotifications,
+            requestWeatherUpdate: jest.fn()
+        });
+
+        render(<WeatherApp />);
+
+        await waitForComponentToLoad();
+
+        // Wait for notifications to appear
+        await waitFor(() => {
+            expect(screen.getByText('Test notification')).toBeInTheDocument();
+        });
+
+        // Find the clear button
+        const clearButton = screen.getByText('Clear (1)');
+        fireEvent.click(clearButton);
+
+        expect(mockClearNotifications).toHaveBeenCalled();
     });
 });

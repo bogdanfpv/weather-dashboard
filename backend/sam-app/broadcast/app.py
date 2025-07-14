@@ -2,9 +2,17 @@ import json
 import boto3
 import os
 import time
+from decimal import Decimal
+
+class DecimalEncoder(json.JSONEncoder):
+    def default(self, obj):
+        if isinstance(obj, Decimal):
+            return float(obj)  # Convert Decimal to float
+        return super(DecimalEncoder, self).default(obj)
 
 dynamodb = boto3.resource('dynamodb')
 table = dynamodb.Table(os.environ['CONNECTIONS_TABLE'])
+DEBUG_MODE = os.environ.get('DEBUG_MODE', 'false').lower() == 'true'
 
 def lambda_handler(event, context):
     """
@@ -43,7 +51,7 @@ def lambda_handler(event, context):
             print("No active connections to broadcast to")
             return {
                 'statusCode': 200,
-                'body': json.dumps('No active connections')
+                'body': json.dumps('No active connections', cls=DecimalEncoder)
             }
 
         # Prepare broadcast message
@@ -62,7 +70,7 @@ def lambda_handler(event, context):
             try:
                 apigw_client.post_to_connection(
                     ConnectionId=connection_id,
-                    Data=json.dumps(broadcast_data)
+                    Data=json.dumps(broadcast_data, cls=DecimalEncoder)
                 )
                 successful_sends += 1
 
@@ -82,17 +90,20 @@ def lambda_handler(event, context):
             'total_connections': len(connections)
         }
 
-        print(f"Broadcast complete: {json.dumps(result)}")
+        print(f"Broadcast complete: {json.dumps(result, cls=DecimalEncoder)}")
 
         return {
             'statusCode': 200,
-            'body': json.dumps(result)
+            'body': json.dumps(result, cls=DecimalEncoder)
         }
 
     except Exception as e:
         print(f"Error in broadcast function: {str(e)}")
+        error_message = 'Broadcast failed'
+        if DEBUG_MODE:
+            error_message += f': {str(e)}'
 
         return {
             'statusCode': 500,
-            'body': json.dumps(f'Broadcast failed: {str(e)}')
+            'body': json.dumps(error_message, cls=DecimalEncoder)
         }
