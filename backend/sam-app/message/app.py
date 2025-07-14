@@ -12,8 +12,9 @@ RATE_LIMIT_TABLE = os.environ.get('RATE_LIMIT_TABLE', 'WeatherRateLimit')
 rate_limit_table = dynamodb.Table(RATE_LIMIT_TABLE)
 RATE_LIMIT_MINUTES = 45
 
-# Add your OpenWeatherMap API key as an environment variable
-OPENWEATHER_API_KEY = os.environ.get('OPENWEATHER_API_KEY', '60aca708ebaceefe441a9aa0e5a77717')
+OPENWEATHER_API_KEY = os.environ.get('OPENWEATHER_API_KEY')
+if not OPENWEATHER_API_KEY:
+    raise RuntimeError('OPENWEATHER_API_KEY environment variable is not set
 
 def get_apigw_client(event):
     endpoint = f"https://{event['requestContext']['domainName']}/{event['requestContext']['stage']}"
@@ -85,7 +86,7 @@ def fetch_weather_data(city="Paris", country="FR"):
             daily_data[date]["winds"].append(item['wind']['speed'])
 
         # Convert daily data to frontend format (next 5 days)
-        for i, (date, data) in enumerate(list(daily_data.items())[:5]):
+        for date, data in list(daily_data.items())[:5]:
             day_data = {
                 "day": date.strftime("%a"),
                 "date": date.strftime("%d/%m"),
