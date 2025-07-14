@@ -226,4 +226,4 @@ $RECYCLE.BIN/
 *.lnk
 
 # Build folder
-*/build/*
+*/build/*frontend/.next
