@@ -71,7 +71,7 @@ export function useWebSocket(url, { defaultCity = 'Paris', defaultCountry = 'FR'
                         case 'rate_limit_status':
                             console.log('Rate limit status received:', data);
                             // Handle malformed messages gracefully
-                            const canUpdate = data.canUpdate || false;
+                            const canUpdate = data.canUpdate ?? false;
                             const nextUpdate = data.nextUpdateTime || null;
 
                             setCanUpdateWeather(canUpdate);
@@ -147,7 +147,7 @@ export function useWebSocket(url, { defaultCity = 'Paris', defaultCountry = 'FR'
         } catch (error) {
             console.error('Failed to connect WebSocket:', error);
         }
-    }, [url]);
+    }, [url, defaultCity, defaultCountry]);
 
     const disconnect = useCallback(() => {
         if (reconnectTimeoutRef.current) {

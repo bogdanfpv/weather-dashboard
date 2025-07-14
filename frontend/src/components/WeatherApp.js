@@ -560,10 +560,12 @@ const WeatherApp = () => {
                 )}
                 <span>
                   {isLoadingWeather
-                    ? "Updating..."
-                    : !canUpdateWeather && nextUpdateTime
-                      ? `Available at ${new Date(nextUpdateTime * 1000).toLocaleTimeString()}`
-                      : "Update Weather"}
+                      ? "Updating..."
+                      : !canUpdateWeather
+                          ? nextUpdateTime
+                              ? `Available at ${new Date(nextUpdateTime * 1000).toLocaleTimeString()}`
+                              : "Updates rate limited"
+                          : "Update Weather"}
                 </span>
               </button>
 
