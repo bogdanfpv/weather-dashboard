@@ -15,7 +15,7 @@ def test_connect_function():
     # Setup mock DynamoDB
     dynamodb_resource = boto3.resource('dynamodb', region_name='eu-north-1')
     table = dynamodb_resource.create_table(
-        TableName='test-connections',
+        TableName=os.environ['CONNECTIONS_TABLE'],
         KeySchema=[{'AttributeName': 'connectionId', 'KeyType': 'HASH'}],
         AttributeDefinitions=[{'AttributeName': 'connectionId', 'AttributeType': 'S'}],
         BillingMode='PAY_PER_REQUEST'

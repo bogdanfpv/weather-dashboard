@@ -1,6 +1,0 @@
-{
-  "/_not-found/page": "app/_not-found/page.js",
-  "/api/get-cached-weather/route": "app/api/get-cached-weather/route.js",
-  "/page": "app/page.js",
-  "/api/update-weather/route": "app/api/update-weather/route.js"
-}

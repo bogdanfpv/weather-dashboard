@@ -26,5 +26,5 @@ jobs:
           AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
           AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           AWS_DEFAULT_REGION: eu-north-1
-        run: sam deploy --no-confirm-changeset --no-fail-on-empty-changeset --config-file samconfig.toml --stack-name hello-world-app-v2 --capabilities CAPABILITY_IAM
+        run: sam deploy --no-confirm-changeset --no-fail-on-empty-changeset --config-file samconfig.toml --stack-name hello-world-app-v2 --capabilities CAPABILITY_IAM --parameter-overrides OpenWeatherMapApiKey=${{ secrets.OPENWEATHER_API_KEY }}
         working-directory: backend/sam-app

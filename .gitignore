@@ -2,6 +2,7 @@
 node_modules/
 /.pnp
 .pnp.js
+.next/
 
 # testing
 /coverage
@@ -225,4 +226,4 @@ $RECYCLE.BIN/
 *.lnk
 
 # Build folder
-*/build/*
+frontend/.next

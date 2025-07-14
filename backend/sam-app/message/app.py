@@ -8,8 +8,13 @@ from datetime import datetime
 dynamodb = boto3.resource('dynamodb')
 table = dynamodb.Table(os.environ['CONNECTIONS_TABLE'])
 
-# Add your OpenWeatherMap API key as an environment variable
-OPENWEATHER_API_KEY = os.environ.get('OPENWEATHER_API_KEY', '60aca708ebaceefe441a9aa0e5a77717')
+RATE_LIMIT_TABLE = os.environ.get('RATE_LIMIT_TABLE', 'WeatherRateLimit')
+rate_limit_table = dynamodb.Table(RATE_LIMIT_TABLE)
+RATE_LIMIT_MINUTES = 45
+
+OPENWEATHER_API_KEY = os.environ.get('OPENWEATHER_API_KEY')
+if not OPENWEATHER_API_KEY:
+    raise RuntimeError('OPENWEATHER_API_KEY environment variable is not set
 
 def get_apigw_client(event):
     endpoint = f"https://{event['requestContext']['domainName']}/{event['requestContext']['stage']}"
@@ -81,7 +86,7 @@ def fetch_weather_data(city="Paris", country="FR"):
             daily_data[date]["winds"].append(item['wind']['speed'])
 
         # Convert daily data to frontend format (next 5 days)
-        for i, (date, data) in enumerate(list(daily_data.items())[:5]):
+        for date, data in list(daily_data.items())[:5]:
             day_data = {
                 "day": date.strftime("%a"),
                 "date": date.strftime("%d/%m"),
@@ -125,6 +130,30 @@ def lambda_handler(event, context):
 
         apigw_client = get_apigw_client(event)
 
+        if message_type == 'get_rate_limit_status':
+            last_update = get_last_update_time()
+            now = int(time.time())
+            can_update = True
+            next_update_time = None
+            if last_update and now - last_update < RATE_LIMIT_MINUTES * 60:
+                can_update = False
+                next_update_time = last_update + RATE_LIMIT_MINUTES * 60
+
+            rate_limit_data = {
+                'type': 'rate_limit_status',
+                'canUpdate': can_update,
+                'nextUpdateTime': next_update_time,
+                'timestamp': now
+            }
+            apigw_client.post_to_connection(
+                ConnectionId=connection_id,
+                Data=json.dumps(rate_limit_data)
+            )
+            return {
+                'statusCode': 200,
+                'body': json.dumps('Rate limit status sent')
+            }
+
         if message_type == 'get_weather':
             # Fetch weather data and broadcast to all clients
             city = body.get('city', 'Paris')
@@ -147,37 +176,45 @@ def lambda_handler(event, context):
 def handle_weather_request(apigw_client, connection_id, city, country):
     """Handle weather data request and broadcast to all clients"""
     try:
+        # Rate limit check
+        last_update = get_last_update_time()
+        now = int(time.time())
+        if last_update and now - last_update < RATE_LIMIT_MINUTES * 60:
+            next_update_time = last_update + RATE_LIMIT_MINUTES * 60
+            denial_data = {
+                'type': 'weather_request_denied',
+                'message': 'Weather update request denied. Please wait before requesting again.',
+                'nextUpdateTime': next_update_time,
+                'timestamp': now
+            }
+            apigw_client.post_to_connection(
+                ConnectionId=connection_id,
+                Data=json.dumps(denial_data)
+            )
+            return {
+                'statusCode': 429,
+                'body': json.dumps('Rate limit active')
+            }
+
         # Fetch weather data
         weather_data = fetch_weather_data(city, country)
+        set_last_update_time()  # Update rate limit timestamp
 
         broadcast_data = {
             'type': 'weather_update',
             'data': weather_data,
-            'timestamp': int(time.time()),
+            'timestamp': now,
             'requested_by': connection_id
         }
 
-        try:
-            apigw_client.post_to_connection(
+        apigw_client.post_to_connection(
             ConnectionId=connection_id,
             Data=json.dumps(broadcast_data)
         )
 
-        except apigw_client.exceptions.GoneException:
-            #Connection is stale remove it from DynamoDB
-            table.delete_item(Key={'connectionId': connection_id}
-        except apigw_client.exceptions.LimitExceededException:
-            print(f"Rate limit exceeded: {str(e)}")
-        except Exception as e:
-            print(f"Unexpected error posting to connection{str(e)}")
-
         return {
             'statusCode': 200,
-            'body': json.dumps({
-                'message': 'Weather data fetched and broadcast successfully',
-                'successful_sends': successful_sends,
-                'failed_sends': failed_sends
-            })
+            'body': json.dumps('Weather data fetched and sent')
         }
 
     except Exception as e:
@@ -259,3 +296,13 @@ def broadcast_message(apigw_client, message, sender_id):
     except Exception as e:
         print(f"Error broadcasting message: {str(e)}")
         raise
+
+def get_last_update_time():
+    try:
+        response = rate_limit_table.get_item(Key={'id': 'last_update'})
+        return response['Item']['timestamp']
+    except KeyError:
+        return None
+
+def set_last_update_time():
+    rate_limit_table.put_item(Item={'id': 'last_update', 'timestamp': int(time.time())})

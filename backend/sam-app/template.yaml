@@ -15,6 +15,7 @@ Globals:
     Environment:
       Variables:
         CONNECTIONS_TABLE: !Ref ConnectionsTable
+        RATE_LIMIT_TABLE: 'WeatherRateLimitTable'
 
 Resources:
   # DynamoDB table to store active WebSocket connections
