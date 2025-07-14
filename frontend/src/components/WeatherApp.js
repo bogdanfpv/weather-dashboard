@@ -26,7 +26,7 @@ const WEBSOCKET_URL =
 
 const WeatherApp = () => {
   // Initial mock weather data
-  const [weatherData, setWeatherData] = useState({
+  const [cachedWeatherData, setCachedWeatherData] = useState({
     location: "Paris, FR",
     date: "Monday 29 August",
     current: {
@@ -106,6 +106,10 @@ const WeatherApp = () => {
   const [isClient, setIsClient] = useState(false);
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
 
+  const location = cachedWeatherData.location.split(", ");
+  const city = location[0] || "Paris";
+  const country = location[1] || "FR";
+
   // WebSocket hook with weather functionality
   const {
     isConnected,
@@ -116,7 +120,7 @@ const WeatherApp = () => {
     nextUpdateTime,
     clearNotifications,
     requestWeatherUpdate,
-  } = useWebSocket(WEBSOCKET_URL);
+  } = useWebSocket(WEBSOCKET_URL, { defaultCity: city, defaultCountry: country });
 
   useEffect(() => {
     const fetchCachedWeather = async () => {
@@ -124,7 +128,7 @@ const WeatherApp = () => {
         const response = await fetch("/api/get-cached-weather");
         if (response.ok) {
           const { data, lastUpdated } = await response.json();
-          setWeatherData(data);
+          setCachedWeatherData(data);
           setLastUpdated(new Date(lastUpdated).toLocaleTimeString());
         }
       } catch (error) {
@@ -138,7 +142,7 @@ const WeatherApp = () => {
   // Update weather data when live data is received
   useEffect(() => {
     if (liveWeatherData) {
-      setWeatherData(liveWeatherData);
+      setCachedWeatherData(liveWeatherData);
       setLastUpdated(new Date().toLocaleTimeString());
     }
   }, [liveWeatherData]);
@@ -212,7 +216,7 @@ const WeatherApp = () => {
           const response = await fetch("/api/get-cached-weather");
           if (response.ok) {
             const { data, lastUpdated } = await response.json();
-            setWeatherData(data);
+            setCachedWeatherData(data);
             setLastUpdated(new Date(lastUpdated).toLocaleTimeString());
           }
         } catch (error) {
@@ -239,7 +243,7 @@ const WeatherApp = () => {
         const cached = await fetch("/api/get-cached-weather");
         if (cached.ok) {
           const { data, lastUpdated } = await cached.json();
-          setWeatherData(data);
+          setCachedWeatherData(data);
           setLastUpdated(new Date(lastUpdated).toLocaleTimeString());
         }
       } catch (error) {
@@ -319,24 +323,24 @@ const WeatherApp = () => {
           </button>
         </div>
         <nav className="space-y-2">
-          <a
-            href="#"
+          <button
+            type="button"
             className="block text-white hover:bg-white/20 px-3 py-2 rounded-lg transition-colors"
           >
             Dashboard
-          </a>
-          <a
-            href="#"
+          </button>
+          <button
+            type="button"
             className="block text-white hover:bg-white/20 px-3 py-2 rounded-lg transition-colors"
           >
             Forecast
-          </a>
-          <a
-            href="#"
+          </button>
+          <button
+            type="button"
             className="block text-white hover:bg-white/20 px-3 py-2 rounded-lg transition-colors"
           >
             Settings
-          </a>
+          </button>
         </nav>
       </div>
       <div className="container mx-auto px-4 py-6 max-w-6xl">
@@ -353,7 +357,7 @@ const WeatherApp = () => {
 
             <div className="flex items-center justify-center space-x-2 flex-1">
               <h1 className="text-white text-2xl md:text-3xl font-light">
-                {weatherData.location}
+                {cachedWeatherData.location}
                 {isClient && currentTime && ` • ${currentTime}`}
               </h1>
               <div
@@ -369,7 +373,7 @@ const WeatherApp = () => {
             {/* Empty div for balance */}
             <div className="w-10"></div>
           </div>
-          <p className="text-blue-100 text-sm">{weatherData.date}</p>
+          <p className="text-blue-100 text-sm">{cachedWeatherData.date}</p>
         </header>
 
         {/* Main Content Grid */}
@@ -384,10 +388,10 @@ const WeatherApp = () => {
                 />
               </div>
               <div className="text-6xl md:text-7xl font-thin mb-2">
-                {weatherData.current.temp}°
+                {cachedWeatherData.current.temp}°
               </div>
               <p className="text-xl md:text-2xl text-blue-100 mb-6">
-                {weatherData.current.condition}
+                {cachedWeatherData.current.condition}
               </p>
 
               {/* Quick Stats Row */}
@@ -396,34 +400,34 @@ const WeatherApp = () => {
                   <Thermometer className="w-5 h-5 mb-1 text-red-300" />
                   <span className="text-blue-100">High</span>
                   <span className="font-medium">
-                    {weatherData.current.high}°
+                    {cachedWeatherData.current.high}°
                   </span>
                 </div>
                 <div className="flex flex-col items-center">
                   <Thermometer className="w-5 h-5 mb-1 text-blue-300" />
                   <span className="text-blue-100">Low</span>
                   <span className="font-medium">
-                    {weatherData.current.low}°
+                    {cachedWeatherData.current.low}°
                   </span>
                 </div>
                 <div className="flex flex-col items-center">
                   <Wind className="w-5 h-5 mb-1 text-gray-300" />
                   <span className="text-blue-100">Wind</span>
                   <span className="font-medium">
-                    {weatherData.current.wind}
+                    {cachedWeatherData.current.wind}
                   </span>
                 </div>
                 <div className="flex flex-col items-center">
                   <Droplets className="w-5 h-5 mb-1 text-blue-300" />
                   <span className="text-blue-100">Sky</span>
-                  <span className="font-medium">{weatherData.current.sky}</span>
+                  <span className="font-medium">{cachedWeatherData.current.sky}</span>
                 </div>
               </div>
             </div>
           </div>
 
           {/* Weather Stats - Takes full width on mobile, 1 col on desktop */}
-          <WeatherStats weatherData={weatherData} />
+          <WeatherStats weatherData={cachedWeatherData} />
         </div>
 
         {/* Hourly Forecast - Hidden on mobile, shown on tablet+ */}
@@ -433,7 +437,7 @@ const WeatherApp = () => {
               Today's Weather
             </h2>
             <div className="grid grid-cols-7 gap-4">
-              {weatherData.hourly.map((hour, idx) => (
+              {cachedWeatherData.hourly.map((hour, idx) => (
                 <div key={idx} className="text-center text-white">
                   <p className="text-sm text-blue-100 mb-2">{hour.time}</p>
                   <div className="flex justify-center mb-2">
@@ -452,7 +456,7 @@ const WeatherApp = () => {
 
           {/* Mobile Layout - Cards */}
           <div className="md:hidden space-y-3">
-            {weatherData.daily.map((day, idx) => (
+            {cachedWeatherData.daily.map((day, idx) => (
               <div
                 key={idx}
                 className="flex items-center justify-between py-3 border-b border-white/10 last:border-b-0"
@@ -484,7 +488,7 @@ const WeatherApp = () => {
               <div className="font-medium text-blue-100">Wind</div>
               <div className="font-medium text-blue-100">Rain</div>
 
-              {weatherData.daily.map((day, idx) => (
+              {cachedWeatherData.daily.map((day, idx) => (
                 <React.Fragment key={idx}>
                   <div className="py-3 border-b border-white/10">
                     <p className="font-medium">{day.day}</p>
