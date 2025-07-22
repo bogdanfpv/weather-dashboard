@@ -119,6 +119,25 @@ Resources:
                 - execute-api:ManageConnections
               Resource: !Sub "arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${WeatherWebSocketApi}/*"
 
+  ScheduledWeatherFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: scheduled-weather/
+      Handler: app.lambda_handler
+      Environment:
+        Variables:
+          OPENWEATHER_API_KEY: !Ref OpenWeatherMapApiKey
+          UPSTASH_REDIS_REST_URL: 'https://game-stingray-12658.upstash.io'
+          UPSTASH_REDIS_REST_TOKEN: 'ATFyAAIjcDEzNDViNTk3OGQ4ODY0Yjk3YjA5MzQwYTQ5MTdlYjNkZnAxMA'
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref RateLimitTable
+      Events:
+        ScheduledWeatherUpdate:
+          Type: Schedule
+          Properties:
+            Schedule: rate(6 hours)
+
   # Deployment and Stage (moved up before routes)
   WebSocketDeployment:
     Type: AWS::ApiGatewayV2::Deployment
