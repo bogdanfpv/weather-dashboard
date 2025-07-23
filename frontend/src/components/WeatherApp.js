@@ -15,6 +15,7 @@ import {
   Sunset,
   RefreshCw,
   Loader2,
+  ChevronDown
 } from "lucide-react";
 import { Bell, X } from "lucide-react";
 import { useWebSocket } from "../hooks/useWebSocket";
@@ -75,6 +76,7 @@ const WeatherApp = () => {
   const [lastUpdated, setLastUpdated] = useState("");
   const [isClient, setIsClient] = useState(false);
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
+  const [isLocationDropdownOpen, setIsLocationDropdownOpen] = useState(false);
 
   // Safe location parsing with fallbacks
   const location = (cachedWeatherData?.location || "Loading...").split(", ");
@@ -232,6 +234,29 @@ const WeatherApp = () => {
     }
   };
 
+  const locationDropdownRef = useRef(null);
+  useEffect(() => {
+    if (!isClient) return;
+
+    const handleClickOutside = (event) => {
+      if (locationDropdownRef.current && !locationDropdownRef.current.contains(event.target)) {
+        setIsLocationDropdownOpen(false);
+      }
+    };
+
+    const handleResize = () => {
+      setIsLocationDropdownOpen(false);
+    };
+
+    document.addEventListener('mousedown', handleClickOutside);
+    window.addEventListener('resize', handleResize);
+
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside);
+      window.removeEventListener('resize', handleResize);
+    };
+  }, [isClient]);
+
   const NotificationPanel = () => {
     if (!isClient || notifications.length === 0) return null;
 
@@ -299,9 +324,9 @@ const WeatherApp = () => {
         <div
             data-testid="sidebar"
             className={`
-        fixed inset-y-0 left-0 z-50 w-64 bg-white/10 backdrop-blur-md border-r border-white/20 p-6 transform transition-transform duration-300 ease-in-out
-        ${isSidebarOpen ? "translate-x-0" : "-translate-x-full"}
-    `}
+    fixed inset-y-0 left-0 z-50 w-64 bg-white/10 backdrop-blur-md border-r border-white/20 p-6 transform transition-transform duration-300 ease-in-out flex flex-col
+    ${isSidebarOpen ? "translate-x-0" : "-translate-x-full"}
+`}
         >
           <div className="flex items-center justify-between mb-6">
             <h2 className="text-lg font-bold text-white">WeatherApp</h2>
@@ -312,26 +337,62 @@ const WeatherApp = () => {
               <X className="w-5 h-5" />
             </button>
           </div>
-          <nav className="space-y-2">
+
+          <nav className="space-y-2 flex-1">
             <button
                 type="button"
-                className="block text-white hover:bg-white/20 px-3 py-2 rounded-lg transition-colors"
+                className="block text-white hover:bg-white/20 px-3 py-2 rounded-lg transition-colors w-full text-left"
             >
               Dashboard
             </button>
             <button
                 type="button"
-                className="block text-white hover:bg-white/20 px-3 py-2 rounded-lg transition-colors"
+                className="block text-white hover:bg-white/20 px-3 py-2 rounded-lg transition-colors w-full text-left"
             >
               Forecast
             </button>
             <button
                 type="button"
-                className="block text-white hover:bg-white/20 px-3 py-2 rounded-lg transition-colors"
+                className="block text-white hover:bg-white/20 px-3 py-2 rounded-lg transition-colors w-full text-left"
             >
               Settings
             </button>
           </nav>
+
+          {/* Greyed out buttons that require login */}
+          <div className="mt-auto pt-4 space-y-2">
+            <button
+                type="button"
+                className="block text-white/40 px-3 py-2 rounded-lg w-full text-left cursor-not-allowed"
+                disabled
+            >
+              Historical Data
+            </button>
+            <button
+                type="button"
+                className="block text-white/40 px-3 py-2 rounded-lg w-full text-left cursor-not-allowed"
+                disabled
+            >
+              Saved Locations
+            </button>
+            <button
+                type="button"
+                className="block text-white/40 px-3 py-2 rounded-lg w-full text-left cursor-not-allowed"
+                disabled
+            >
+              Weather Alerts
+            </button>
+          </div>
+
+          {/* Login button at bottom */}
+          <div className="mt-auto pt-4 border-t border-white/20">
+            <button
+                type="button"
+                className="block text-white hover:bg-white/20 px-3 py-2 rounded-lg transition-colors w-full text-left font-medium"
+            >
+              Login
+            </button>
+          </div>
         </div>
 
         <div className="container mx-auto px-4 py-6 max-w-6xl">
@@ -355,6 +416,37 @@ const WeatherApp = () => {
                     className={`w-2 h-2 rounded-full ${isConnected ? "bg-green-400" : "bg-red-400"}`}
                     title={isConnected ? "Live updates connected" : "Live updates disconnected"}
                 />
+                <div className="relative" ref={locationDropdownRef}>
+                  <button
+                      onClick={() => setIsLocationDropdownOpen(!isLocationDropdownOpen)}
+                      className="text-white hover:bg-white/20 p-1 rounded transition-colors"
+                  >
+                    <ChevronDown className="w-4 h-4" />
+                  </button>
+
+                  {isLocationDropdownOpen && (
+                      <div className="absolute top-full left-0 mt-2 bg-white/10 backdrop-blur-md rounded-lg border border-white/20 py-2 min-w-[160px] z-50">
+                        <button
+                            onClick={() => {
+                              // Add your location change logic here for Helsinki
+                              setIsLocationDropdownOpen(false);
+                            }}
+                            className="block w-full text-left px-4 py-2 text-white hover:bg-white/20 transition-colors"
+                        >
+                          Helsinki, FI
+                        </button>
+                        <button
+                            onClick={() => {
+                              // Add your location change logic here for Washington DC
+                              setIsLocationDropdownOpen(false);
+                            }}
+                            className="block w-full text-left px-4 py-2 text-white hover:bg-white/20 transition-colors"
+                        >
+                          Washington DC, US
+                        </button>
+                      </div>
+                  )}
+                </div>
               </div>
 
               <div className="w-10"></div>
