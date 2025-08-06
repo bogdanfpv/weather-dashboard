@@ -12,14 +12,14 @@ const WeatherStats = ({ weatherData }) => {
                             <Sunrise className="w-5 h-5 text-yellow-400" />
                             <span className="text-blue-100">Sunrise</span>
                         </div>
-                        <span className="font-medium">{weatherData.current.sunrise}</span>
+                        <span className="font-medium">{weatherData?.current?.sunrise}</span>
                     </div>
                     <div className="flex items-center justify-between">
                         <div className="flex items-center space-x-2">
                             <Sunset className="w-5 h-5 text-orange-400" />
                             <span className="text-blue-100">Sunset</span>
                         </div>
-                        <span className="font-medium">{weatherData.current.sunset}</span>
+                        <span className="font-medium">{weatherData?.current?.sunset}</span>
                     </div>
                 </div>
             </div>
@@ -32,22 +32,22 @@ const WeatherStats = ({ weatherData }) => {
                             <Eye className="w-4 h-4 text-blue-300" />
                             <span className="text-blue-100">Visibility</span>
                         </div>
-                        <span>{weatherData.current.visibility}</span>
+                        <span>{weatherData?.current?.visibility}</span>
                     </div>
                     <div className="flex items-center justify-between">
                         <div className="flex items-center space-x-2">
                             <Droplets className="w-4 h-4 text-blue-300" />
                             <span className="text-blue-100">Humidity</span>
                         </div>
-                        <span>{weatherData.current.humidity}</span>
+                        <span>{weatherData?.current?.humidity}</span>
                     </div>
                     <div className="flex items-center justify-between">
                         <span className="text-blue-100">Pressure</span>
-                        <span>{weatherData.current.pressure}</span>
+                        <span>{weatherData?.current?.pressure}</span>
                     </div>
                     <div className="flex items-center justify-between">
                         <span className="text-blue-100">UV Index</span>
-                        <span>{weatherData.current.uvIndex}</span>
+                        <span>{weatherData?.current?.uvIndex}</span>
                     </div>
                 </div>
             </div>

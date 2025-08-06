@@ -1,69 +1,18 @@
 "use client";
 
 import React, { useState, useEffect, useRef } from "react";
+import WeekForecastPanel from "./WeekForecastPanel";
+import ControlPanel from "./ControlPanel";
+import CurrentTemperature from "./CurrentTemperature";
+import WeatherIcon, { mapOpenWeatherCondition } from "./WeatherIcon";
+
 import {
   Menu,
-  Sun,
-  Cloud,
-  CloudRain,
-  CloudSnow,
-  Wind,
-  Eye,
-  Droplets,
-  Thermometer,
-  Sunrise,
-  Sunset,
-  RefreshCw,
-  Loader2,
   ChevronDown
 } from "lucide-react";
 import { Bell, X } from "lucide-react";
 import { useWebSocket } from "../hooks/useWebSocket";
-
-// Temporary placeholders for missing components
-const WeatherStats = ({ weatherData }) => (
-    <div className="bg-white/10 backdrop-blur-md rounded-2xl p-6 text-white">
-      <h3 className="text-lg font-medium mb-4">Weather Stats</h3>
-      <div className="space-y-3">
-        <div className="flex justify-between">
-          <span>Sunrise:</span>
-          <span>{weatherData?.current?.sunrise || "N/A"}</span>
-        </div>
-        <div className="flex justify-between">
-          <span>Sunset:</span>
-          <span>{weatherData?.current?.sunset || "N/A"}</span>
-        </div>
-        <div className="flex justify-between">
-          <span>Humidity:</span>
-          <span>{weatherData?.current?.humidity || "N/A"}</span>
-        </div>
-        <div className="flex justify-between">
-          <span>Pressure:</span>
-          <span>{weatherData?.current?.pressure || "N/A"}</span>
-        </div>
-        <div className="flex justify-between">
-          <span>Visibility:</span>
-          <span>{weatherData?.current?.visibility || "N/A"}</span>
-        </div>
-        <div className="flex justify-between">
-          <span>UV Index:</span>
-          <span>{weatherData?.current?.uvIndex || "N/A"}</span>
-        </div>
-      </div>
-    </div>
-);
-
-const WeatherIcon = ({ condition, size = "w-6 h-6" }) => {
-  const iconMap = {
-    clear: Sun,
-    cloudy: Cloud,
-    rain: CloudRain,
-    snow: CloudSnow,
-  };
-
-  const IconComponent = iconMap[condition] || Sun;
-  return <IconComponent className={`${size} text-yellow-300`} />;
-};
+import WeatherStats from "./WeatherStats";
 
 const WEBSOCKET_URL =
     "wss://e9z9tauxbc.execute-api.eu-north-1.amazonaws.com/Prod";
@@ -223,14 +172,7 @@ const WeatherApp = () => {
 
   const handleRefreshWeather = async () => {
     if (isConnected && !isLoadingWeather && canUpdateWeather) {
-      // Only use WebSocket - it already updates Redis
       requestWeatherUpdate();
-
-      // Remove the redundant API calls that are causing 504 timeout
-      // The WebSocket already handles:
-      // 1. Fetching fresh weather data
-      // 2. Updating Redis cache
-      // 3. Sending updated data back to client
     }
   };
 
@@ -454,62 +396,13 @@ const WeatherApp = () => {
             <p className="text-blue-100 text-sm" data-testid="date-display">{cachedWeatherData.date}</p>
           </header>
 
-          {/* Main Content Grid */}
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-6">
-            {/* Current Temperature */}
-            <div className="lg:col-span-2">
-              <div className="bg-white/10 backdrop-blur-md rounded-3xl p-8 text-center text-white h-full">
-                <div className="flex items-center justify-center mb-4">
-                  <WeatherIcon
-                      condition={cachedWeatherData.current.sky || "clear"}
-                      size="w-20 h-20 md:w-24 md:w-24"
-                  />
-                </div>
-                <div className="text-6xl md:text-7xl font-thin mb-2" data-testid="main-temperature">
-                  {cachedWeatherData.current.temp || 0}°
-                </div>
-                <p className="text-xl md:text-2xl text-blue-100 mb-6" data-testid="weather-condition">
-                  {cachedWeatherData.current.condition || "Loading..."}
-                </p>
-                {/* Quick Stats Row */}
-                <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
-                  <div className="flex flex-col items-center">
-                    <Thermometer className="w-5 h-5 mb-1 text-red-300" />
-                    <span className="text-blue-100">High</span>
-                    <span className="font-medium" data-testid="high-temp">
-  {cachedWeatherData.current.high || 0}°
-</span>
-                  </div>
-                  <div className="flex flex-col items-center">
-                    <Thermometer className="w-5 h-5 mb-1 text-blue-300" />
-                    <span className="text-blue-100">Low</span>
-                    <span className="font-medium" data-testid="low-temp">
-  {cachedWeatherData.current.low || 0}°
-</span>
-                  </div>
-                  <div className="flex flex-col items-center">
-                    <Wind className="w-5 h-5 mb-1 text-gray-300" />
-                    <span className="text-blue-100">Wind</span>
-                    <span className="font-medium" data-testid="wind-speed">
-  {cachedWeatherData.current.wind || "N/A"}
-</span>
-                  </div>
-                  <div className="flex flex-col items-center">
-                    <Droplets className="w-5 h-5 mb-1 text-blue-300" />
-                    <span className="text-blue-100">Sky</span>
-                    <span className="font-medium" data-testid="sky-condition">
-  {cachedWeatherData.current.sky || "N/A"}
-</span>
-                  </div>
-                </div>
-              </div>
-            </div>
+            <CurrentTemperature cachedWeatherData={cachedWeatherData} />
 
-            {/* Weather Stats */}
             <WeatherStats weatherData={cachedWeatherData} />
+
           </div>
 
-          {/* Hourly Forecast */}
           <div className="hidden md:block mb-6">
             <div className="bg-white/10 backdrop-blur-md rounded-2xl p-6">
               <h2 className="text-white text-xl font-medium mb-4">
@@ -520,7 +413,7 @@ const WeatherApp = () => {
                     <div key={idx} className="text-center text-white">
                       <p className="text-sm text-blue-100 mb-2">{hour.time}</p>
                       <div className="flex justify-center mb-2">
-                        <WeatherIcon condition={hour.icon} size="w-6 h-6" />
+                        <WeatherIcon condition={hour.icon}/>
                       </div>
                       <p className="font-medium">{hour.temp}°</p>
                     </div>
@@ -529,138 +422,20 @@ const WeatherApp = () => {
             </div>
           </div>
 
-          {/* 5-Day Forecast */}
-          <div className="bg-white/10 backdrop-blur-md rounded-2xl p-6">
-            <h2 className="text-white text-xl font-medium mb-4">Next 5 Days</h2>
+          <WeekForecastPanel cachedWeatherData={cachedWeatherData} />
 
-            {/* Mobile Layout - Cards */}
-            <div className="md:hidden space-y-3">
-              {(cachedWeatherData.daily || []).map((day, idx) => (
-                  <div
-                      key={idx}
-                      className="flex items-center justify-between py-3 border-b border-white/10 last:border-b-0"
-                  >
-                    <div className="flex items-center space-x-3">
-                      <WeatherIcon condition={day.icon} size="w-8 h-8" />
-                      <div>
-                        <p className="text-white font-medium">{day.day}</p>
-                        <p className="text-blue-100 text-sm">{day.date}</p>
-                      </div>
-                    </div>
-                    <div className="text-right">
-                      <p className="text-white font-medium">
-                        {day.low}-{day.high}°
-                      </p>
-                      <p className="text-blue-100 text-sm">{day.rain} rain</p>
-                    </div>
-                  </div>
-              ))}
-            </div>
+          <ControlPanel
+              isConnected={isConnected}
+              isLoadingWeather={isLoadingWeather}
+              canUpdateWeather={canUpdateWeather}
+              nextUpdateTime={nextUpdateTime}
+              clearNotifications={clearNotifications}
+              handleRefreshWeather={handleRefreshWeather}
+              lastUpdated={lastUpdated}
+              notifications={notifications}
+              isClient={isClient}
+          />
 
-            {/* Desktop Layout - Table */}
-            <div className="hidden md:block">
-              <div className="grid grid-cols-6 gap-4 text-white">
-                <div className="font-medium text-blue-100">Day</div>
-                <div className="font-medium text-blue-100">Condition</div>
-                <div className="font-medium text-blue-100">Low</div>
-                <div className="font-medium text-blue-100">High</div>
-                <div className="font-medium text-blue-100">Wind</div>
-                <div className="font-medium text-blue-100">Rain</div>
-
-                {(cachedWeatherData.daily || []).map((day, idx) => (
-                    <React.Fragment key={idx}>
-                      <div className="py-3 border-b border-white/10">
-                        <p className="font-medium">{day.day}</p>
-                        <p className="text-blue-100 text-sm">{day.date}</p>
-                      </div>
-                      <div className="py-3 border-b border-white/10 flex items-center space-x-2">
-                        <WeatherIcon condition={day.icon} size="w-5 h-5" />
-                        <span className="capitalize">{day.icon}</span>
-                      </div>
-                      <div className="py-3 border-b border-white/10">
-                        {day.low}°
-                      </div>
-                      <div className="py-3 border-b border-white/10">
-                        {day.high}°
-                      </div>
-                      <div className="py-3 border-b border-white/10">
-                        {day.wind}
-                      </div>
-                      <div className="py-3 border-b border-white/10">
-                        {day.rain}
-                      </div>
-                    </React.Fragment>
-                ))}
-              </div>
-            </div>
-          </div>
-
-          {/* Control Panel */}
-          <div className="bg-white/10 backdrop-blur-md rounded-2xl p-6 mt-6">
-            <h2 className="text-white text-xl font-medium mb-4">
-              Live Weather Controls
-            </h2>
-            <div className="flex flex-col sm:flex-row items-center justify-between space-y-4 sm:space-y-0 sm:space-x-4">
-              <div className="flex items-center space-x-4">
-                <div
-                    className={`flex items-center space-x-2 px-3 py-1 rounded-full text-sm ${
-                        isConnected
-                            ? "bg-green-500/20 text-green-300"
-                            : "bg-red-500/20 text-red-300"
-                    }`}
-                >
-                  <div
-                      className={`w-2 h-2 rounded-full ${isConnected ? "bg-green-400" : "bg-red-400"}`}
-                  />
-                  <span>{isConnected ? "Connected" : "Disconnected"}</span>
-                </div>
-                {isClient && lastUpdated && (
-                    <span className="text-blue-100 text-sm">
-                  Last updated: {lastUpdated}
-                </span>
-                )}
-              </div>
-
-              <div className="flex space-x-3">
-                <button
-                    onClick={handleRefreshWeather}
-                    disabled={!isConnected || isLoadingWeather || !canUpdateWeather}
-                    className={`flex items-center space-x-2 px-4 py-2 rounded-lg transition-colors ${
-                        !isConnected || isLoadingWeather || !canUpdateWeather
-                            ? "bg-gray-500/20 text-gray-400 cursor-not-allowed"
-                            : "bg-white/20 hover:bg-white/30 text-white"
-                    }`}
-                >
-                  {isLoadingWeather ? (
-                      <Loader2 className="w-4 h-4 animate-spin" />
-                  ) : (
-                      <RefreshCw className="w-4 h-4" />
-                  )}
-                  <span>
-                  {isLoadingWeather
-                      ? "Updating..."
-                      : !canUpdateWeather
-                          ? nextUpdateTime
-                              ? `Available at ${new Date(nextUpdateTime * 1000).toLocaleTimeString()}`
-                              : "Updates rate limited"
-                          : "Update Weather"}
-                </span>
-                </button>
-
-                {notifications.length > 0 && (
-                    <button
-                        onClick={clearNotifications}
-                        className="flex items-center space-x-2 bg-blue-500/20 hover:bg-blue-500/30 text-blue-200 px-4 py-2 rounded-lg transition-colors"
-                    >
-                      <Bell className="w-4 h-4" />
-                      <span>Clear ({notifications.length})</span>
-                    </button>
-                )}
-              </div>
-            </div>
-          </div>
-
-          {/* Footer */}
           <footer className="text-center mt-8 text-blue-100 text-sm">
             <p>
               Live weather updates via WebSocket • Powered by OpenWeatherMap API

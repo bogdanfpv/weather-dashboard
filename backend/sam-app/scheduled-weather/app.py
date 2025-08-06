@@ -170,6 +170,7 @@ def update_redis(weather_data):
 def lambda_handler(event, context):
     """Handler for scheduled weather updates"""
     try:
+        
         print("Starting scheduled weather update")
         # Default to Paris if no city is specified
         city = "Paris"
