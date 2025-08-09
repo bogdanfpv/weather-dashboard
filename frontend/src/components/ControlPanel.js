@@ -1,4 +1,4 @@
-'use client';
+"use client";
 
 import React from "react";
 import { Loader2, RefreshCw, Bell } from "lucide-react";
