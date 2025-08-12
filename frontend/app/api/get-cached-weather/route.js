@@ -25,7 +25,7 @@ export async function GET(request) {
         }
 
         // Generate the same location key format used by Lambda
-        const locationKey = location.toLowerCase();
+        const locationKey = location.toLowerCase().replace(', ', '_');
 
         console.log(`Fetching cached weather for location key: ${locationKey}`);
 
