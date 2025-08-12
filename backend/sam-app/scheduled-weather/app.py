@@ -18,7 +18,7 @@ if not OPENWEATHER_API_KEY:
 
 def get_location_key(city, country):
     """Generate a consistent key for location-based storage"""
-    return f"{city.lower()},{country.lower()}"
+    return f"{city.lower()}_{country.lower()}"
 
 def fetch_weather_data(city="Paris", country="FR"):
     """Fetch weather data from OpenWeatherMap API"""
