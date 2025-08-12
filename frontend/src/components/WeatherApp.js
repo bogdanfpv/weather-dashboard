@@ -1,198 +1,151 @@
 "use client";
 
-import React, { useState, useEffect, useRef } from "react";
+import React, { useState, useEffect, useRef, useMemo } from "react";
 import WeekForecastPanel from "./WeekForecastPanel";
 import ControlPanel from "./ControlPanel";
 import CurrentTemperature from "./CurrentTemperature";
 import WeatherIcon from "./WeatherIcon";
 import Sidebar from "./Sidebar";
 import WeatherHeader from "./WeatherHeader";
-
-import { Menu, ChevronDown } from "lucide-react";
+import { useWeatherCache } from "../hooks/useWeatherCache";
 import { useWebSocket } from "../hooks/useWebSocket";
 import WeatherStats from "./WeatherStats";
 import NotificationPanel from "./NotificationPanel";
 
 const WEBSOCKET_URL =
-  "wss://e9z9tauxbc.execute-api.eu-north-1.amazonaws.com/Prod";
+    "wss://e9z9tauxbc.execute-api.eu-north-1.amazonaws.com/Prod";
 
 const WeatherApp = () => {
-  const [cachedWeatherData, setCachedWeatherData] = useState(null);
-  const [isLoading, setIsLoading] = useState(true);
-  const [isDataReady, setIsDataReady] = useState(false);
-  const [currentTime, setCurrentTime] = useState("");
-  const [lastUpdated, setLastUpdated] = useState("");
-  const [isClient, setIsClient] = useState(false);
-  const [isSidebarOpen, setIsSidebarOpen] = useState(false);
-  const [isLocationDropdownOpen, setIsLocationDropdownOpen] = useState(false);
+    const [currentTime, setCurrentTime] = useState("");
+    const [isClient, setIsClient] = useState(false);
+    const [isSidebarOpen, setIsSidebarOpen] = useState(false);
+    const [isLocationDropdownOpen, setIsLocationDropdownOpen] = useState(false);
+    const [selectedLocation, setSelectedLocation] = useState("");
 
-  const location = (cachedWeatherData?.location || "Loading...").split(", ");
-  const city = location[0] || "Paris";
-  const country = location[1] || "FR";
+    // Set isClient to true after component mounts
+    useEffect(() => {
+        setIsClient(true);
+    }, []);
 
-  // WebSocket hook with conditional connection
-  const {
-    isConnected,
-    notifications,
-    weatherData: liveWeatherData,
-    isLoadingWeather,
-    canUpdateWeather,
-    nextUpdateTime,
-    clearNotifications,
-    requestWeatherUpdate,
-  } = useWebSocket(
-    isDataReady
-      ? "wss://e9z9tauxbc.execute-api.eu-north-1.amazonaws.com/Prod"
-      : null,
-    { defaultCity: city, defaultCountry: country },
-  );
+    const {
+        cachedWeatherData,
+        setCachedWeatherData,
+        isLoading,
+        isDataReady,
+        lastUpdated,
+        setLastUpdated,
+    } = useWeatherCache(selectedLocation);
 
-  // Fetch cached weather immediately on mount
-  useEffect(() => {
-    setIsClient(true);
-
-    const fetchCachedWeather = async () => {
-      try {
-        console.log("Fetching cached weather...");
-
-        const response = await fetch(
-          `/api/get-cached-weather?t=${Date.now()}`,
-          {
-            cache: "no-store",
-            headers: {
-              "Cache-Control": "no-cache, no-store, must-revalidate",
-              Pragma: "no-cache",
-            },
-          },
-        );
-
-        if (response.ok) {
-          const responseData = await response.json();
-          const { data, lastUpdated } = responseData;
-
-          if (data && data.current) {
-            setCachedWeatherData(data);
-            setLastUpdated(new Date(lastUpdated).toLocaleTimeString());
-            setIsDataReady(true); // Enable WebSocket connection
-            console.log("Weather data set successfully");
-          }
+    // Parse current location from cached data
+    const currentLocation = useMemo(() => {
+        if (!cachedWeatherData?.location) {
+            return { city: "Paris", country: "FR" };
         }
-      } catch (error) {
-        console.error("Failed to fetch cached weather data:", error);
-      } finally {
-        setIsLoading(false);
-      }
-    };
+        const parts = cachedWeatherData.location.split(", ");
+        return {
+            city: parts[0] || "Paris",
+            country: parts[1] || "FR"
+        };
+    }, [cachedWeatherData?.location]);
 
-    fetchCachedWeather();
-  }, []);
+    const locationParts = (cachedWeatherData?.location || "Loading...").split(", ");
 
-  // Update weather data when live data is received
-  useEffect(() => {
-    if (liveWeatherData) {
-      setCachedWeatherData(liveWeatherData);
-      setLastUpdated(new Date().toLocaleTimeString());
-    }
-  }, [liveWeatherData]);
-
-  // Update time after client mount
-  useEffect(() => {
-    if (!isClient) return;
-
-    const updateTime = () => {
-      const now = new Date().toLocaleTimeString([], {
-        hour: "2-digit",
-        minute: "2-digit",
-        hour12: true,
-      });
-      setCurrentTime(now);
-      if (!lastUpdated) {
-        setLastUpdated(now);
-      }
-    };
-
-    updateTime();
-    const timer = setInterval(updateTime, 60000);
-    return () => clearInterval(timer);
-  }, [isClient, lastUpdated]);
-
-  const wakeLockRef = useRef(null);
-
-  useEffect(() => {
-    if (!isClient) return;
-
-    const requestWakeLock = async () => {
-      try {
-        wakeLockRef.current = await navigator.wakeLock.request("screen");
-        console.log("Wake Lock acquired");
-      } catch (err) {
-        console.error("Wake Lock error:", err.message);
-        wakeLockRef.current = null;
-      }
-    };
-
-    if ("wakeLock" in navigator) {
-      requestWakeLock().catch((err) => {
-        console.error("Failed to request initial wake lock:", err);
-      });
-
-      const handleVisibilityChange = () => {
-        if (document.visibilityState === "visible" && !wakeLockRef.current) {
-          requestWakeLock().catch((err) => {
-            console.error(
-              "Failed to request wake lock on visibility change:",
-              err,
-            );
-          });
-        }
-      };
-
-      document.addEventListener("visibilitychange", handleVisibilityChange);
-
-      return () => {
-        document.removeEventListener(
-          "visibilitychange",
-          handleVisibilityChange,
-        );
-        if (wakeLockRef.current) {
-          wakeLockRef.current
-            .release()
-            .catch((err) => console.error("Error releasing wake lock:", err));
-        }
-      };
-    }
-  }, [isClient]);
-
-  // Periodic weather updates
-  useEffect(() => {
-    if (!isClient) return;
-
-    const interval = setInterval(
-      async () => {
-        try {
-          const response = await fetch("/api/get-cached-weather");
-          if (response.ok) {
-            const { data, lastUpdated } = await response.json();
-            if (data) {
-              setCachedWeatherData(data);
-              setLastUpdated(new Date(lastUpdated).toLocaleTimeString());
-            }
-          }
-        } catch (error) {
-          console.error("Failed to fetch cached weather data:", error);
-        }
-      },
-      60 * 60 * 1000,
+    const {
+        isConnected,
+        notifications,
+        weatherData: liveWeatherData,
+        isLoadingWeather,
+        canUpdateWeather,
+        nextUpdateTime,
+        clearNotifications,
+        requestWeatherUpdate,
+    } = useWebSocket(
+        WEBSOCKET_URL,
+        { city: currentLocation.city, country: currentLocation.country }
     );
 
-    return () => clearInterval(interval);
-  }, [isClient]);
+    // Update weather data when live data is received
+    useEffect(() => {
+        if (liveWeatherData) {
+            setCachedWeatherData(liveWeatherData);
+            setLastUpdated(new Date().toLocaleTimeString());
+        }
+    }, [liveWeatherData, setCachedWeatherData, setLastUpdated]);
 
-  const handleRefreshWeather = async () => {
-    if (isConnected && !isLoadingWeather && canUpdateWeather) {
-      requestWeatherUpdate();
-    }
-  };
+    // Update time after client mount
+    useEffect(() => {
+        if (!isClient) return;
+
+        const updateTime = () => {
+            const now = new Date().toLocaleTimeString([], {
+                hour: "2-digit",
+                minute: "2-digit",
+                hour12: true,
+            });
+            setCurrentTime(now);
+            if (!lastUpdated) {
+                setLastUpdated(now);
+            }
+        };
+
+        updateTime();
+        const timer = setInterval(updateTime, 60000);
+        return () => clearInterval(timer);
+    }, [isClient, lastUpdated, setLastUpdated]);
+
+    const wakeLockRef = useRef(null);
+
+    useEffect(() => {
+        if (!isClient) return;
+
+        const requestWakeLock = async () => {
+            try {
+                wakeLockRef.current = await navigator.wakeLock.request("screen");
+                console.log("Wake Lock acquired");
+            } catch (err) {
+                console.error("Wake Lock error:", err.message);
+                wakeLockRef.current = null;
+            }
+        };
+
+        if ("wakeLock" in navigator) {
+            requestWakeLock().catch((err) => {
+                console.error("Failed to request initial wake lock:", err);
+            });
+
+            const handleVisibilityChange = () => {
+                if (document.visibilityState === "visible" && !wakeLockRef.current) {
+                    requestWakeLock().catch((err) => {
+                        console.error(
+                            "Failed to request wake lock on visibility change:",
+                            err,
+                        );
+                    });
+                }
+            };
+
+            document.addEventListener("visibilitychange", handleVisibilityChange);
+
+            return () => {
+                document.removeEventListener(
+                    "visibilitychange",
+                    handleVisibilityChange,
+                );
+                if (wakeLockRef.current) {
+                    wakeLockRef.current
+                        .release()
+                        .catch((err) => console.error("Error releasing wake lock:", err));
+                }
+            };
+        }
+    }, [isClient]);
+
+    const handleRefreshWeather = async () => {
+        if (isConnected && !isLoadingWeather && canUpdateWeather) {
+            // Pass current location to the request
+            requestWeatherUpdate(currentLocation.city, currentLocation.country);
+        }
+    };
 
   const locationDropdownRef = useRef(null);
   useEffect(() => {
@@ -220,13 +173,31 @@ const WeatherApp = () => {
     };
   }, [isClient]);
 
-  if (isLoading || !cachedWeatherData || !cachedWeatherData.current) {
-    return (
-      <div className="min-h-screen bg-gradient-to-b from-blue-500 via-blue-600 to-blue-800 flex items-center justify-center">
-        <div className="text-white text-xl">Loading weather data...</div>
-      </div>
-    );
-  }
+    useEffect(() => {
+        // Only request via WebSocket if:
+        // 1. Cache check is complete (!isLoading)
+        // 2. Cache is empty (!cachedWeatherData)
+        // 3. WebSocket is connected
+        // 4. Rate limit allows it (canUpdateWeather === true)
+        if (!isLoading && !cachedWeatherData && isConnected && canUpdateWeather === true) {
+            console.log("Cache is empty and rate limit allows - requesting fresh data via WebSocket...");
+            requestWeatherUpdate(currentLocation.city, currentLocation.country);
+        }
+    }, [isLoading, cachedWeatherData, isConnected, canUpdateWeather, requestWeatherUpdate, currentLocation.city, currentLocation.country]);
+
+    if (!cachedWeatherData && !liveWeatherData) {
+        return (
+            <div className="min-h-screen bg-gradient-to-b from-blue-500 via-blue-600 to-blue-800 flex items-center justify-center">
+                <div className="text-white text-xl">
+                    {isLoading ? "Checking cache..." :
+                        isLoadingWeather ? "Fetching fresh weather data..." :
+                            !isConnected ? "Connecting to weather service..." :
+                                    !canUpdateWeather ? "Rate limited - waiting for next update..." :
+                                        "Loading weather data..."}
+                </div>
+            </div>
+        );
+    }
 
   return (
     <div className="flex min-h-screen bg-gradient-to-b from-blue-500 via-blue-600 to-blue-800">
@@ -258,6 +229,8 @@ const WeatherApp = () => {
             isClient={isClient}
             setIsLocationDropdownOpen={setIsLocationDropdownOpen}
             isLocationDropdownOpen={isLocationDropdownOpen}
+            onLocationChange={setSelectedLocation}
+            selectedLocation={selectedLocation}
           />
         </header>
 
@@ -273,15 +246,15 @@ const WeatherApp = () => {
               Today's Weather
             </h2>
             <div className="grid grid-cols-7 gap-4">
-              {(cachedWeatherData.hourly || []).map((hour, idx) => (
-                <div key={idx} className="text-center text-white">
-                  <p className="text-sm text-blue-100 mb-2">{hour.time}</p>
-                  <div className="flex justify-center mb-2">
-                    <WeatherIcon condition={hour.icon} />
-                  </div>
-                  <p className="font-medium">{hour.temp}°</p>
-                </div>
-              ))}
+                {(cachedWeatherData?.hourly || []).map((hour, idx) => (
+                    <div key={idx} className="text-center text-white">
+                        <p className="text-sm text-blue-100 mb-2">{hour.time}</p>
+                        <div className="flex justify-center mb-2">
+                            <WeatherIcon condition={hour.icon} />
+                        </div>
+                        <p className="font-medium">{hour.temp}°</p>
+                    </div>
+                ))}
             </div>
           </div>
         </div>

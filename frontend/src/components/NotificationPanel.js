@@ -4,7 +4,7 @@ import { Bell, X } from "lucide-react";
 import React from "react";
 
 const NotificationPanel = ({ notifications, clearNotifications }) => {
-  if (!notifications || notifications.length === 0 || !clearNotification)
+  if (!notifications || notifications.length === 0 || !clearNotifications)
     return null;
 
   return (

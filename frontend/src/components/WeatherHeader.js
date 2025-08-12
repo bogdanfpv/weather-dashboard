@@ -3,21 +3,25 @@ import React from "react";
 import { Menu, ChevronDown } from "lucide-react";
 
 const WeatherHeader = ({
-  locationDropdownRef,
-  cachedWeatherData,
-  isConnected,
-  currentTime,
-  setIsSidebarOpen,
-  isClient,
-  setIsLocationDropdownOpen,
-  isLocationDropdownOpen,
-}) => {
+                           locationDropdownRef,
+                           cachedWeatherData,
+                           isConnected,
+                           currentTime,
+                           setIsSidebarOpen,
+                           isClient,
+                           setIsLocationDropdownOpen,
+                           isLocationDropdownOpen,
+                           onLocationChange,
+                           selectedLocation,
+                       }) => {
   if (
     !cachedWeatherData ||
     !currentTime ||
     !setIsSidebarOpen ||
     !setIsLocationDropdownOpen ||
-    !locationDropdownRef
+    !locationDropdownRef  ||
+    !onLocationChange ||
+    !selectedLocation
   )
     return null;
   return (
@@ -57,22 +61,28 @@ const WeatherHeader = ({
 
             {isLocationDropdownOpen && (
               <div className="absolute top-full left-0 mt-2 bg-white/10 backdrop-blur-md rounded-lg border border-white/20 py-2 min-w-[160px] z-50">
-                <button
-                  onClick={() => {
-                    setIsLocationDropdownOpen(false);
-                  }}
-                  className="block w-full text-left px-4 py-2 text-white hover:bg-white/20 transition-colors"
-                >
-                  Helsinki, FI
-                </button>
-                <button
-                  onClick={() => {
-                    setIsLocationDropdownOpen(false);
-                  }}
-                  className="block w-full text-left px-4 py-2 text-white hover:bg-white/20 transition-colors"
-                >
-                  Washington DC, US
-                </button>
+                  <button
+                      onClick={() => {
+                          onLocationChange("Helsinki, FI");
+                          setIsLocationDropdownOpen(false);
+                      }}
+                      className={`block w-full text-left px-4 py-2 text-white hover:bg-white/20 transition-colors ${
+                          selectedLocation === "Helsinki, FI" ? "bg-white/20" : ""
+                      }`}
+                  >
+                      Helsinki, FI
+                  </button>
+                  <button
+                      onClick={() => {
+                          onLocationChange("Washington DC, US");
+                          setIsLocationDropdownOpen(false);
+                      }}
+                      className={`block w-full text-left px-4 py-2 text-white hover:bg-white/20 transition-colors ${
+                          selectedLocation === "Washington DC, US" ? "bg-white/20" : ""
+                      }`}
+                  >
+                      Washington DC, US
+                  </button>
               </div>
             )}
           </div>

@@ -4,13 +4,16 @@ import React from "react";
 import WeatherIcon from "./WeatherIcon";
 
 const WeekForecastPanel = ({ cachedWeatherData }) => {
+    if (!cachedWeatherData || !cachedWeatherData.daily) {
+        return null;
+    }
   return (
     <div className="bg-white/10 backdrop-blur-md rounded-2xl p-6">
       <h2 className="text-white text-xl font-medium mb-4">Next 5 Days</h2>
 
       {/* Mobile Layout - Cards */}
       <div className="md:hidden space-y-3">
-        {(cachedWeatherData.daily || []).map((day, idx) => (
+        {(cachedWeatherData?.daily || []).map((day, idx) => (
           <div
             key={idx}
             className="flex items-center justify-between py-3 border-b border-white/10 last:border-b-0"
