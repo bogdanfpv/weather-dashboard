@@ -34,14 +34,16 @@ export async function GET(request) {
         const lastUpdated = await redis.get(`last_updated_${locationKey}`);
 
         if (!cachedWeather) {
-            return Response.json({
+            // Return a standard 404 status that will trigger catch blocks
+            return new Response(JSON.stringify({
                 success: false,
                 message: `No cached weather data available for ${location}`,
                 location: location,
                 locationKey: locationKey
-            }, {
+            }), {
                 status: 404,
                 headers: {
+                    'Content-Type': 'application/json',
                     'Cache-Control': 'no-store, no-cache, must-revalidate, proxy-revalidate',
                     'Pragma': 'no-cache',
                     'Expires': '0'
