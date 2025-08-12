@@ -30,6 +30,10 @@ def get_apigw_client(event):
     endpoint = f"https://{event['requestContext']['domainName']}/{event['requestContext']['stage']}"
     return boto3.client('apigatewaymanagementapi', endpoint_url=endpoint)
 
+def get_location_key(city, country):
+    """Generate a consistent key for location-based storage"""
+    return f"{city.lower()},{country.lower()}"
+
 def fetch_weather_data(city="Paris", country="FR"):
     """Fetch weather data from OpenWeatherMap API"""
     try:
@@ -141,7 +145,11 @@ def lambda_handler(event, context):
         apigw_client = get_apigw_client(event)
 
         if message_type == 'get_rate_limit_status':
-            last_update = get_last_update_time()
+            city = body.get('city', 'Paris')
+            country = body.get('country', 'FR')
+            location_key = get_location_key(city, country)
+
+            last_update = get_last_update_time(location_key)
             now = int(time.time())
             can_update = True
             next_update_time = None
@@ -153,7 +161,8 @@ def lambda_handler(event, context):
                 'type': 'rate_limit_status',
                 'canUpdate': can_update,
                 'nextUpdateTime': next_update_time,
-                'timestamp': now
+                'timestamp': now,
+                'location': f"{city}, {country}"
             }
             apigw_client.post_to_connection(
                 ConnectionId=connection_id,
@@ -190,16 +199,19 @@ def lambda_handler(event, context):
 def handle_weather_request(apigw_client, connection_id, city, country):
     """Handle weather data request and broadcast to all clients"""
     try:
-        # Rate limit check
-        last_update = get_last_update_time()
+        location_key = get_location_key(city, country)
+
+        # Rate limit check per location
+        last_update = get_last_update_time(location_key)
         now = int(time.time())
         if last_update and now - last_update < RATE_LIMIT_MINUTES * 60:
             next_update_time = last_update + RATE_LIMIT_MINUTES * 60
             denial_data = {
                 'type': 'weather_request_denied',
-                'message': 'Weather update request denied. Please wait before requesting again.',
+                'message': f'Weather update request denied for {city}, {country}. Please wait before requesting again.',
                 'nextUpdateTime': next_update_time,
-                'timestamp': now
+                'timestamp': now,
+                'location': f"{city}, {country}"
             }
             apigw_client.post_to_connection(
                 ConnectionId=connection_id,
@@ -211,14 +223,15 @@ def handle_weather_request(apigw_client, connection_id, city, country):
             }
 
         weather_data = fetch_weather_data(city, country)
-        set_last_update_time()
-        update_redis(weather_data)
+        set_last_update_time(location_key)
+        update_redis(weather_data, location_key)
 
         broadcast_data = {
             'type': 'weather_update',
             'data': weather_data,
             'timestamp': now,
-            'requested_by': connection_id
+            'requested_by': connection_id,
+            'location': f"{city}, {country}"
         }
 
         apigw_client.post_to_connection(
@@ -238,8 +251,9 @@ def handle_weather_request(apigw_client, connection_id, city, country):
             error_message = str(e) if DEBUG_MODE else "An error occurred processing your request"
             error_data = {
                 'type': 'weather_error',
-                'message': f'Failed to fetch weather data: {error_message}',
-                'timestamp': int(time.time())
+                'message': f'Failed to fetch weather data for {city}, {country}: {error_message}',
+                'timestamp': int(time.time()),
+                'location': f"{city}, {country}"
             }
             apigw_client.post_to_connection(
                 ConnectionId=connection_id,
@@ -289,15 +303,21 @@ def broadcast_message(apigw_client, message, sender_id):
         print(f"Error broadcasting message: {str(e)}")
         raise
 
-def get_last_update_time():
+def get_last_update_time(location_key):
+    """Get the last update time for a specific location"""
     try:
-        response = rate_limit_table.get_item(Key={'id': 'last_update'})
+        response = rate_limit_table.get_item(Key={'id': f'last_update_{location_key}'})
         return response['Item']['timestamp']
     except KeyError:
         return None
 
-def set_last_update_time():
-    rate_limit_table.put_item(Item={'id': 'last_update', 'timestamp': int(time.time())})
+def set_last_update_time(location_key):
+    """Set the last update time for a specific location"""
+    rate_limit_table.put_item(Item={
+        'id': f'last_update_{location_key}',
+        'timestamp': int(time.time()),
+        'location': location_key
+    })
 
 def echo_message(apigw_client, connection_id, message_data):
     """Echo message back to sender"""
@@ -329,8 +349,8 @@ def echo_message(apigw_client, connection_id, message_data):
             'body': json.dumps(error_message, cls=DecimalEncoder)
         }
 
-def update_redis(weather_data):
-    """Update Upstash Redis with the latest weather data"""
+def update_redis(weather_data, location_key):
+    """Update Upstash Redis with the latest weather data for a specific location"""
     try:
         # Get Redis credentials from environment variables
         redis_url = os.environ.get('UPSTASH_REDIS_REST_URL')
@@ -346,10 +366,10 @@ def update_redis(weather_data):
             "Content-Type": "application/json"
         }
 
-        print(f"Updating Redis at URL: {redis_url}")
+        print(f"Updating Redis at URL: {redis_url} for location: {location_key}")
 
-        # Store weather data using proper Upstash REST API format
-        weather_payload = ["SET", "latest_weather", json.dumps(weather_data)]
+        # Store weather data for specific location using proper Upstash REST API format
+        weather_payload = ["SET", f"latest_weather_{location_key}", json.dumps(weather_data)]
         weather_response = requests.post(
             redis_url,
             headers=headers,
@@ -357,9 +377,9 @@ def update_redis(weather_data):
             timeout=10
         )
 
-        # Store last updated timestamp using proper Upstash REST API format
+        # Store last updated timestamp for specific location using proper Upstash REST API format
         timestamp = datetime.now().isoformat()
-        timestamp_payload = ["SET", "last_updated", timestamp]
+        timestamp_payload = ["SET", f"last_updated_{location_key}", timestamp]
         timestamp_response = requests.post(
             redis_url,
             headers=headers,
@@ -367,18 +387,18 @@ def update_redis(weather_data):
             timeout=10
         )
 
-        print(f"Redis update responses - Weather: {weather_response.status_code}, Data: {weather_response.text}")
-        print(f"Redis timestamp responses - Status: {timestamp_response.status_code}, Data: {timestamp_response.text}")
+        print(f"Redis update responses for {location_key} - Weather: {weather_response.status_code}, Data: {weather_response.text}")
+        print(f"Redis timestamp responses for {location_key} - Status: {timestamp_response.status_code}, Data: {timestamp_response.text}")
 
         if weather_response.status_code == 200 and timestamp_response.status_code == 200:
-            print("Successfully updated Redis with weather data and timestamp")
+            print(f"Successfully updated Redis with weather data and timestamp for {location_key}")
             return True
         else:
-            print(f"Failed to update Redis - Weather: {weather_response.text}, Timestamp: {timestamp_response.text}")
+            print(f"Failed to update Redis for {location_key} - Weather: {weather_response.text}, Timestamp: {timestamp_response.text}")
             return False
 
     except Exception as e:
-        print(f"Error updating Redis: {str(e)}")
+        print(f"Error updating Redis for {location_key}: {str(e)}")
         import traceback
         print(traceback.format_exc())
         return False

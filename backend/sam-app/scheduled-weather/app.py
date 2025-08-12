@@ -16,6 +16,10 @@ OPENWEATHER_API_KEY = os.environ.get('OPENWEATHER_API_KEY')
 if not OPENWEATHER_API_KEY:
     raise RuntimeError('OPENWEATHER_API_KEY environment variable is not set')
 
+def get_location_key(city, country):
+    """Generate a consistent key for location-based storage"""
+    return f"{city.lower()},{country.lower()}"
+
 def fetch_weather_data(city="Paris", country="FR"):
     """Fetch weather data from OpenWeatherMap API"""
     try:
@@ -113,8 +117,8 @@ def map_weather_icon(condition):
     }
     return condition_map.get(condition, "clear")
 
-def update_redis(weather_data):
-    """Update Upstash Redis with the latest weather data"""
+def update_redis(weather_data, location_key):
+    """Update Upstash Redis with the latest weather data for a specific location"""
     try:
         # Get Redis credentials from environment variables
         redis_url = os.environ.get('UPSTASH_REDIS_REST_URL')
@@ -130,10 +134,10 @@ def update_redis(weather_data):
             "Content-Type": "application/json"
         }
 
-        print(f"Updating Redis at URL: {redis_url}")
+        print(f"Updating Redis at URL: {redis_url} for location: {location_key}")
 
-        # Store weather data using proper Upstash REST API format
-        weather_payload = ["SET", "latest_weather", json.dumps(weather_data)]
+        # Store weather data for specific location using proper Upstash REST API format
+        weather_payload = ["SET", f"latest_weather_{location_key}", json.dumps(weather_data)]
         weather_response = requests.post(
             redis_url,
             headers=headers,
@@ -141,9 +145,9 @@ def update_redis(weather_data):
             timeout=10
         )
 
-        # Store last updated timestamp using proper Upstash REST API format
+        # Store last updated timestamp for specific location using proper Upstash REST API format
         timestamp = datetime.now().isoformat()
-        timestamp_payload = ["SET", "last_updated", timestamp]
+        timestamp_payload = ["SET", f"last_updated_{location_key}", timestamp]
         timestamp_response = requests.post(
             redis_url,
             headers=headers,
@@ -151,48 +155,126 @@ def update_redis(weather_data):
             timeout=10
         )
 
-        print(f"Redis update responses - Weather: {weather_response.status_code}, Data: {weather_response.text}")
-        print(f"Redis timestamp responses - Status: {timestamp_response.status_code}, Data: {timestamp_response.text}")
+        print(f"Redis update responses for {location_key} - Weather: {weather_response.status_code}, Data: {weather_response.text}")
+        print(f"Redis timestamp responses for {location_key} - Status: {timestamp_response.status_code}, Data: {timestamp_response.text}")
 
         if weather_response.status_code == 200 and timestamp_response.status_code == 200:
-            print("Successfully updated Redis with weather data and timestamp")
+            print(f"Successfully updated Redis with weather data and timestamp for {location_key}")
             return True
         else:
-            print(f"Failed to update Redis - Weather: {weather_response.text}, Timestamp: {timestamp_response.text}")
+            print(f"Failed to update Redis for {location_key} - Weather: {weather_response.text}, Timestamp: {timestamp_response.text}")
             return False
 
     except Exception as e:
-        print(f"Error updating Redis: {str(e)}")
+        print(f"Error updating Redis for {location_key}: {str(e)}")
         import traceback
         print(traceback.format_exc())
         return False
 
-def lambda_handler(event, context):
-    """Handler for scheduled weather updates"""
+def set_last_update_time(location_key):
+    """Set the last update time for a specific location in DynamoDB"""
     try:
-        print("Starting scheduled weather update")
-        # Default to Paris if no city is specified
-        city = "Paris"
-        country = "FR"
-
-        # Fetch weather data
-        weather_data = fetch_weather_data(city, country)
-
-        # Update Redis
-        update_result = update_redis(weather_data)
-
-        # Set timestamp in DynamoDB for rate limiting if needed
         dynamodb = boto3.resource('dynamodb')
         rate_limit_table = dynamodb.Table(os.environ.get('RATE_LIMIT_TABLE', 'WeatherRateLimit'))
-        rate_limit_table.put_item(Item={'id': 'last_update', 'timestamp': int(datetime.now().timestamp())})
+        rate_limit_table.put_item(Item={
+            'id': f'last_update_{location_key}',
+            'timestamp': int(datetime.now().timestamp()),
+            'location': location_key
+        })
+        print(f"Updated DynamoDB rate limit for {location_key}")
+        return True
+    except Exception as e:
+        print(f"Error updating DynamoDB rate limit for {location_key}: {str(e)}")
+        return False
+
+def lambda_handler(event, context):
+    """Handler for scheduled weather updates - supports multiple cities"""
+    try:
+        print("Starting scheduled weather update")
+
+        # Define multiple cities to update
+        cities_to_update = [
+            {"city": "Paris", "country": "FR"},
+            {"city": "London", "country": "GB"},
+            {"city": "New York", "country": "US"},
+            {"city": "Tokyo", "country": "JP"},
+            {"city": "Sydney", "country": "AU"},
+            {"city": "Berlin", "country": "DE"},
+            {"city": "Toronto", "country": "CA"},
+            {"city": "Mumbai", "country": "IN"},
+            {"city": "São Paulo", "country": "BR"},
+            {"city": "Dubai", "country": "AE"}
+        ]
+
+        # Check if specific city/country was passed in the event
+        if event.get('city') and event.get('country'):
+            cities_to_update = [{"city": event['city'], "country": event['country']}]
+            print(f"Processing single city from event: {event['city']}, {event['country']}")
+        else:
+            print(f"Processing {len(cities_to_update)} default cities")
+
+        results = []
+        successful_updates = 0
+        failed_updates = 0
+
+        for location in cities_to_update:
+            city = location['city']
+            country = location['country']
+            location_key = get_location_key(city, country)
+
+            try:
+                print(f"Fetching weather data for {city}, {country}")
+
+                # Fetch weather data
+                weather_data = fetch_weather_data(city, country)
+
+                # Update Redis
+                redis_success = update_redis(weather_data, location_key)
+
+                # Update DynamoDB rate limit
+                dynamo_success = set_last_update_time(location_key)
+
+                if redis_success and dynamo_success:
+                    successful_updates += 1
+                    result_status = "success"
+                    print(f"Successfully updated {city}, {country}")
+                else:
+                    failed_updates += 1
+                    result_status = "partial_failure"
+                    print(f"Partial failure for {city}, {country} - Redis: {redis_success}, DynamoDB: {dynamo_success}")
+
+                results.append({
+                    "location": f"{city}, {country}",
+                    "location_key": location_key,
+                    "status": result_status,
+                    "redis_success": redis_success,
+                    "dynamo_success": dynamo_success
+                })
+
+            except Exception as e:
+                failed_updates += 1
+                error_msg = str(e)
+                print(f"Failed to update {city}, {country}: {error_msg}")
+                results.append({
+                    "location": f"{city}, {country}",
+                    "location_key": location_key,
+                    "status": "error",
+                    "error": error_msg
+                })
+
+        print(f"Scheduled update completed - Success: {successful_updates}, Failed: {failed_updates}")
 
         return {
             'statusCode': 200,
             'body': json.dumps({
-                'message': 'Scheduled weather update completed successfully',
-                'redis_update_success': update_result
+                'message': 'Scheduled weather update completed',
+                'total_processed': len(cities_to_update),
+                'successful_updates': successful_updates,
+                'failed_updates': failed_updates,
+                'results': results
             }, cls=DecimalEncoder)
         }
+
     except Exception as e:
         print(f"Error in scheduled weather update: {str(e)}")
         import traceback

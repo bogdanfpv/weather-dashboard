@@ -1,6 +1,6 @@
-import { useState, useEffect, useRef, useCallback } from 'react';
+import { useState, useEffect, useRef, useCallback } from "react";
 
-export function useWebSocket(url, { defaultCity = 'Paris', defaultCountry = 'FR' } = {}) {
+export function useWebSocket(url, { city = "Paris", country = "FR" } = {}) {
     const [isConnected, setIsConnected] = useState(false);
     const [notifications, setNotifications] = useState([]);
     const [weatherData, setWeatherData] = useState(null);
@@ -9,6 +9,12 @@ export function useWebSocket(url, { defaultCity = 'Paris', defaultCountry = 'FR'
     const [nextUpdateTime, setNextUpdateTime] = useState(null);
     const wsRef = useRef(null);
     const reconnectTimeoutRef = useRef(null);
+    const currentLocationRef = useRef({ city, country });
+
+    // Update current location when props change
+    useEffect(() => {
+        currentLocationRef.current = { city, country };
+    }, [city, country]);
 
     const connect = useCallback(() => {
         // Don't connect if URL is null or WebSocket is already open
@@ -18,59 +24,71 @@ export function useWebSocket(url, { defaultCity = 'Paris', defaultCountry = 'FR'
             wsRef.current = new WebSocket(url);
 
             wsRef.current.onopen = () => {
-                console.log('WebSocket connected');
+                console.log("WebSocket connected");
                 setIsConnected(true);
 
-                // Request current rate limit status on connection
+                // Request current rate limit status on connection for current location
                 sendMessage({
-                    action: 'get_rate_limit_status',
-                    city: defaultCity,
-                    country: defaultCountry
+                    action: "get_rate_limit_status",
+                    city: currentLocationRef.current.city,
+                    country: currentLocationRef.current.country,
                 });
             };
 
             wsRef.current.onmessage = (event) => {
                 try {
                     const data = JSON.parse(event.data);
-                    console.log('WebSocket message received:', data);
+                    console.log("WebSocket message received:", data);
 
                     // Handle API Gateway error responses
-                    if (data.message === 'Forbidden' || data.message === 'Internal server error') {
-                        console.error('API Gateway error:', data);
+                    if (
+                        data.message === "Forbidden" ||
+                        data.message === "Internal server error"
+                    ) {
+                        console.error("API Gateway error:", data);
                         setIsLoadingWeather(false);
-                        setNotifications(prev => [{
-                            type: 'error',
-                            message: `API Error: ${data.message}. Check your WebSocket configuration.`,
-                            timestamp: Math.floor(Date.now() / 1000)
-                        }, ...prev.slice(0, 9)]);
+                        setNotifications((prev) => [
+                            {
+                                type: "error",
+                                message: `API Error: ${data.message}. Check your WebSocket configuration.`,
+                                timestamp: Math.floor(Date.now() / 1000),
+                            },
+                            ...prev.slice(0, 9),
+                        ]);
                         return;
                     }
 
                     // Handle different message types
                     switch (data.type) {
-                        case 'weather_update':
-                            console.log('Weather data updated:', data.data);
+                        case "weather_update":
+                            console.log("Weather data updated:", data.data);
                             setWeatherData(data.data);
                             setIsLoadingWeather(false);
-                            setNotifications(prev => [{
-                                type: 'weather_alert',
-                                message: `Weather data updated for ${data.data.location}`,
-                                timestamp: data.timestamp
-                            }, ...prev.slice(0, 9)]);
+                            setNotifications((prev) => [
+                                {
+                                    type: "weather_alert",
+                                    message: `Weather data updated for ${data.data.location}`,
+                                    timestamp: data.timestamp,
+                                },
+                                ...prev.slice(0, 9),
+                            ]);
                             break;
 
-                        case 'weather_error':
-                            console.error('Weather fetch error:', data.message);
+                        case "weather_error":
+                            console.error("Weather fetch error:", data.message);
                             setIsLoadingWeather(false);
-                            setNotifications(prev => [{
-                                type: 'error',
-                                message: data.message,
-                                timestamp: data.timestamp
-                            }, ...prev.slice(0, 9)]);
+                            setNotifications((prev) => [
+                                {
+                                    type: "error",
+                                    message: data.message,
+                                    timestamp: data.timestamp,
+                                },
+                                ...prev.slice(0, 9),
+                            ]);
                             break;
 
-                        case 'rate_limit_status':
-                            console.log('Rate limit status received:', data);
+                        case "rate_limit_status":
+                            console.log("Rate limit status received:", data);
                             // Handle malformed messages gracefully
                             const canUpdate = data.canUpdate ?? false;
                             const nextUpdate = data.nextUpdateTime || null;
@@ -79,55 +97,69 @@ export function useWebSocket(url, { defaultCity = 'Paris', defaultCountry = 'FR'
                             setNextUpdateTime(nextUpdate);
 
                             if (!canUpdate && nextUpdate) {
-                                setNotifications(prev => [{
-                                    type: 'rate_limit',
-                                    message: `Weather updates available again at ${new Date(nextUpdate * 1000).toLocaleTimeString()}`,
-                                    timestamp: data.timestamp
-                                }, ...prev.slice(0, 9)]);
+                                setNotifications((prev) => [
+                                    {
+                                        type: "rate_limit",
+                                        message: `Weather updates for ${data.location || 'this location'} available again at ${new Date(nextUpdate * 1000).toLocaleTimeString()}`,
+                                        timestamp: data.timestamp,
+                                    },
+                                    ...prev.slice(0, 9),
+                                ]);
                             }
                             break;
 
-                        case 'rate_limit_updated':
-                            console.log('Rate limit updated:', data);
+                        case "rate_limit_updated":
+                            console.log("Rate limit updated:", data);
                             setCanUpdateWeather(data.canUpdate);
                             setNextUpdateTime(data.nextUpdateTime);
 
                             const message = data.canUpdate
-                                ? 'Weather updates are now available!'
-                                : `Weather updates limited until ${new Date(data.nextUpdateTime * 1000).toLocaleTimeString()}`;
+                                ? `Weather updates are now available for ${data.location || 'this location'}!`
+                                : `Weather updates for ${data.location || 'this location'} limited until ${new Date(data.nextUpdateTime * 1000).toLocaleTimeString()}`;
 
-                            setNotifications(prev => [{
-                                type: data.canUpdate ? 'rate_limit_available' : 'rate_limit',
-                                message,
-                                timestamp: data.timestamp
-                            }, ...prev.slice(0, 9)]);
+                            setNotifications((prev) => [
+                                {
+                                    type: data.canUpdate ? "rate_limit_available" : "rate_limit",
+                                    message,
+                                    timestamp: data.timestamp,
+                                },
+                                ...prev.slice(0, 9),
+                            ]);
                             break;
 
-                        case 'weather_request_denied':
-                            console.log('Weather request denied due to rate limit');
+                        case "weather_request_denied":
+                            console.log("Weather request denied due to rate limit");
                             setIsLoadingWeather(false);
-                            setNotifications(prev => [{
-                                type: 'error',
-                                message: data.message || 'Weather update request denied. Please wait before requesting again.',
-                                timestamp: data.timestamp
-                            }, ...prev.slice(0, 9)]);
+                            setNotifications((prev) => [
+                                {
+                                    type: "error",
+                                    message: data.message || "Weather update request denied. Please wait before requesting again.",
+                                    timestamp: data.timestamp,
+                                },
+                                ...prev.slice(0, 9),
+                            ]);
                             break;
 
-                        case 'test':
-                        case 'broadcast':
-                        case 'echo':
+                        case "test":
+                        case "broadcast":
+                        case "echo":
                         default:
-                            setNotifications(prev => [data, ...prev.slice(0, 9)]);
+                            setNotifications((prev) => [data, ...prev.slice(0, 9)]);
                             break;
                     }
                 } catch (e) {
-                    console.error('Error parsing WebSocket message:', e);
+                    console.error("Error parsing WebSocket message:", e);
                     setIsLoadingWeather(false);
                 }
             };
 
             wsRef.current.onclose = (event) => {
-                console.log('WebSocket disconnected. Code:', event.code, 'Reason:', event.reason);
+                console.log(
+                    "WebSocket disconnected. Code:",
+                    event.code,
+                    "Reason:",
+                    event.reason,
+                );
                 setIsConnected(false);
                 setIsLoadingWeather(false);
                 setCanUpdateWeather(false);
@@ -138,17 +170,16 @@ export function useWebSocket(url, { defaultCity = 'Paris', defaultCountry = 'FR'
             };
 
             wsRef.current.onerror = (error) => {
-                console.error('WebSocket error:', error);
+                console.error("WebSocket error:", error);
                 setIsConnected(false);
                 setIsLoadingWeather(false);
                 setCanUpdateWeather(false);
                 setNextUpdateTime(null);
             };
-
         } catch (error) {
-            console.error('Failed to connect WebSocket:', error);
+            console.error("Failed to connect WebSocket:", error);
         }
-    }, [url, defaultCity, defaultCountry]);
+    }, [url]);
 
     const disconnect = useCallback(() => {
         if (reconnectTimeoutRef.current) {
@@ -168,62 +199,92 @@ export function useWebSocket(url, { defaultCity = 'Paris', defaultCountry = 'FR'
         if (wsRef.current?.readyState === WebSocket.OPEN) {
             try {
                 const messageStr = JSON.stringify(message);
-                console.log('Sending WebSocket message:', messageStr);
+                console.log("Sending WebSocket message:", messageStr);
                 wsRef.current.send(messageStr);
                 return true;
             } catch (error) {
-                console.error('Error sending WebSocket message:', error);
+                console.error("Error sending WebSocket message:", error);
                 return false;
             }
         } else {
-            console.error('WebSocket is not connected. Ready state:', wsRef.current?.readyState);
+            console.error(
+                "WebSocket is not connected. Ready state:",
+                wsRef.current?.readyState,
+            );
             return false;
         }
     }, []);
 
-    const requestWeatherUpdate = useCallback((city = defaultCity, country = defaultCountry) => {
-        if (!isConnected) {
-            console.error('Cannot request weather: WebSocket not connected');
-            setNotifications(prev => [{
-                type: 'error',
-                message: 'Cannot update weather: Not connected to server',
-                timestamp: Math.floor(Date.now() / 1000)
-            }, ...prev.slice(0, 9)]);
-            return false;
+    const requestWeatherUpdate = useCallback(
+        (requestCity, requestCountry) => {
+            // Use provided city/country or fall back to current location
+            const targetCity = requestCity || currentLocationRef.current.city;
+            const targetCountry = requestCountry || currentLocationRef.current.country;
+
+            if (!isConnected) {
+                console.error("Cannot request weather: WebSocket not connected");
+                setNotifications((prev) => [
+                    {
+                        type: "error",
+                        message: "Cannot update weather: Not connected to server",
+                        timestamp: Math.floor(Date.now() / 1000),
+                    },
+                    ...prev.slice(0, 9),
+                ]);
+                return false;
+            }
+
+            if (!canUpdateWeather) {
+                console.error("Cannot request weather: Rate limit active");
+                const nextUpdateStr = nextUpdateTime
+                    ? new Date(nextUpdateTime * 1000).toLocaleTimeString()
+                    : "later";
+                setNotifications((prev) => [
+                    {
+                        type: "error",
+                        message: `Weather updates are rate limited. Try again at ${nextUpdateStr}`,
+                        timestamp: Math.floor(Date.now() / 1000),
+                    },
+                    ...prev.slice(0, 9),
+                ]);
+                return false;
+            }
+
+            setIsLoadingWeather(true);
+            const success = sendMessage({
+                action: "get_weather",
+                city: targetCity,
+                country: targetCountry,
+                timestamp: Math.floor(Date.now() / 1000),
+            });
+
+            if (!success) {
+                setIsLoadingWeather(false);
+                setNotifications((prev) => [
+                    {
+                        type: "error",
+                        message: "Failed to send weather request",
+                        timestamp: Math.floor(Date.now() / 1000),
+                    },
+                    ...prev.slice(0, 9),
+                ]);
+            }
+
+            return success;
+        },
+        [isConnected, canUpdateWeather, nextUpdateTime, sendMessage],
+    );
+
+    // Update rate limit status when location changes
+    useEffect(() => {
+        if (isConnected) {
+            sendMessage({
+                action: "get_rate_limit_status",
+                city: currentLocationRef.current.city,
+                country: currentLocationRef.current.country,
+            });
         }
-
-        if (!canUpdateWeather) {
-            console.error('Cannot request weather: Rate limit active');
-            const nextUpdateStr = nextUpdateTime
-                ? new Date(nextUpdateTime * 1000).toLocaleTimeString()
-                : 'later';
-            setNotifications(prev => [{
-                type: 'error',
-                message: `Weather updates are rate limited. Try again at ${nextUpdateStr}`,
-                timestamp: Math.floor(Date.now() / 1000)
-            }, ...prev.slice(0, 9)]);
-            return false;
-        }
-
-        setIsLoadingWeather(true);
-        const success = sendMessage({
-            action: 'get_weather',
-            city: city,
-            country: country,
-            timestamp: Math.floor(Date.now() / 1000)
-        });
-
-        if (!success) {
-            setIsLoadingWeather(false);
-            setNotifications(prev => [{
-                type: 'error',
-                message: 'Failed to send weather request',
-                timestamp: Math.floor(Date.now() / 1000)
-            }, ...prev.slice(0, 9)]);
-        }
-
-        return success;
-    }, [isConnected, canUpdateWeather, nextUpdateTime, sendMessage]);
+    }, [city, country, isConnected, sendMessage]);
 
     useEffect(() => {
         if (url) {
@@ -247,6 +308,6 @@ export function useWebSocket(url, { defaultCity = 'Paris', defaultCountry = 'FR'
         nextUpdateTime,
         clearNotifications,
         sendMessage,
-        requestWeatherUpdate
+        requestWeatherUpdate,
     };
 }
