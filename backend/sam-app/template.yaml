@@ -6,6 +6,13 @@ Parameters:
     Type: String
     Description: OpenWeatherMap API key for weather data
     NoEcho: true
+  UpstashRedisUrl:
+    Type: String
+    Description: Upstash Redis REST API URL
+  UpstashRedisToken:
+      Type: String
+      Description: Upstash Redis REST API Token
+      NoEcho: true
 
 Globals:
   Function:
@@ -17,15 +24,21 @@ Globals:
         CONNECTIONS_TABLE: !Ref ConnectionsTable
         RATE_LIMIT_TABLE: !Ref RateLimitTable
         DEBUG_MODE: 'true'
-        UPSTASH_REDIS_REST_URL: 'https://game-stingray-12658.upstash.io'
-        UPSTASH_REDIS_REST_TOKEN: 'ATFyAAIjcDEzNDViNTk3OGQ4ODY0Yjk3YjA5MzQwYTQ5MTdlYjNkZnAxMA'
+        UPSTASH_REDIS_REST_URL: !Ref UpstashRedisUrl
+        UPSTASH_REDIS_REST_TOKEN: !Ref UpstashRedisToken
+        OPENWEATHER_API_KEY: !Ref OpenWeatherMapApiKey
+        WEBSOCKET_API_ENDPOINT: 'e9z9tauxbc.execute-api.eu-north-1.amazonaws.com/Prod'
+        TOKEN_FUNCTION_ARN: !GetAtt TokenFunction.Arn
+        SCHEDULER_ROLE_ARN: !GetAtt SchedulerRole.Arn
+        DEFAULT_CITIES: 'Paris,FR|London,GB|Tokyo,JP|Sydney,AU|Berlin,DE|Toronto,CA|Mumbai,IN|Dubai,AE'
+        RATE_LIMIT_MINUTES: '60'
 
 Resources:
-  # DynamoDB table to store active WebSocket connections
   ConnectionsTable:
     Type: AWS::DynamoDB::Table
+    DeletionPolicy: Delete
     Properties:
-      TableName: websocket-connections
+      TableName: !Sub "websocket-connections-${AWS::StackName}"
       AttributeDefinitions:
         - AttributeName: connectionId
           AttributeType: S
@@ -37,11 +50,11 @@ Resources:
         AttributeName: ttl
         Enabled: true
 
-  # DynamoDB table for rate limiting
   RateLimitTable:
     Type: AWS::DynamoDB::Table
+    DeletionPolicy: Delete
     Properties:
-      TableName: weather-rate-limit
+      TableName: !Sub "weather-rate-limit-${AWS::StackName}"
       AttributeDefinitions:
         - AttributeName: id
           AttributeType: S
@@ -50,7 +63,6 @@ Resources:
           KeyType: HASH
       BillingMode: PAY_PER_REQUEST
 
-  # WebSocket API
   WeatherWebSocketApi:
     Type: AWS::ApiGatewayV2::Api
     Properties:
@@ -58,7 +70,33 @@ Resources:
       ProtocolType: WEBSOCKET
       RouteSelectionExpression: "$request.body.action"
 
-  # Lambda Functions
+  TokenFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: token/
+      Handler: app.lambda_handler
+      Timeout: 60
+      Environment:
+        Variables:
+          CONNECTIONS_TABLE: !Ref ConnectionsTable
+          RATE_LIMIT_TABLE: !Ref RateLimitTable
+          OPENWEATHER_API_KEY: !Ref OpenWeatherMapApiKey
+      Policies:
+        - DynamoDBCrubPolicy:
+          TableName : !Ref ConnectionsTable
+        - DynamoDBCrubPolicy:
+          TableName : !Ref RateLimitTable
+
+  TokenCustomResource:
+    type: AWS::CloudFormation::CustomResource
+    DependsOn:
+      - ConnectionsTable
+      - RateLimitTable
+      - WeatherWebSocketApi
+    Properties:
+      ServiceToken: !GetAtt TokenFunction.Arn
+      StackName: !Ref AWS::StackName
+
   ConnectFunction:
     Type: AWS::Serverless::Function
     Properties:
@@ -90,6 +128,7 @@ Resources:
       Environment:
         Variables:
           OPENWEATHER_API_KEY: !Ref OpenWeatherMapApiKey
+          TOKEN_FUNCTION_NAME: !Ref TokenFunction
       Policies:
         - DynamoDBCrudPolicy:
             TableName: !Ref ConnectionsTable
@@ -100,8 +139,20 @@ Resources:
               Action:
                 - execute-api:ManageConnections
               Resource: !Sub "arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${WeatherWebSocketApi}/*"
+        - Statement:
+            - Effect: Allow
+              Action:
+                - lambda:InvokeFunction
+              Resource: !GetAtt TokenFunction.Arn
 
-  # Broadcast function - for sending notifications from other services
+  TokenFunctionInvokePermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !Ref TokenFunction
+      Action: lambda:InvokeFunction
+      Principal: lambda.amazonaws.com
+      SourceArn: !GetAtt MessageFunction.Arn
+
   BroadcastFunction:
     Type: AWS::Serverless::Function
     Properties:
@@ -124,11 +175,6 @@ Resources:
     Properties:
       CodeUri: scheduled-weather/
       Handler: app.lambda_handler
-      Environment:
-        Variables:
-          OPENWEATHER_API_KEY: !Ref OpenWeatherMapApiKey
-          UPSTASH_REDIS_REST_URL: 'https://game-stingray-12658.upstash.io'
-          UPSTASH_REDIS_REST_TOKEN: 'ATFyAAIjcDEzNDViNTk3OGQ4ODY0Yjk3YjA5MzQwYTQ5MTdlYjNkZnAxMA'
       Policies:
         - DynamoDBCrudPolicy:
             TableName: !Ref RateLimitTable
@@ -138,7 +184,30 @@ Resources:
           Properties:
             Schedule: rate(6 hours)
 
-  # Deployment and Stage (moved up before routes)
+  SchedulerRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: scheduler.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: InvokeTokenFunction
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action: lambda:InvokeFunction
+                Resource: !GetAtt TokenFunction.Arn
+
+  ScheduledWeatherCustomResource:
+    Type: AWS::CloudFormation::CustomResource
+    Properties:
+      ServiceToken: !GetAtt ScheduledWeatherFunction.Arn
+
   WebSocketDeployment:
     Type: AWS::ApiGatewayV2::Deployment
     DependsOn:
@@ -155,7 +224,6 @@ Resources:
       DeploymentId: !Ref WebSocketDeployment
       StageName: Prod
 
-  # Integrations
   ConnectIntegration:
     Type: AWS::ApiGatewayV2::Integration
     Properties:
@@ -177,7 +245,6 @@ Resources:
       IntegrationType: AWS_PROXY
       IntegrationUri: !Sub "arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${MessageFunction.Arn}/invocations"
 
-  # Routes
   ConnectRoute:
     Type: AWS::ApiGatewayV2::Route
     Properties:
@@ -194,7 +261,6 @@ Resources:
       AuthorizationType: NONE
       Target: !Sub "integrations/${DisconnectIntegration}"
 
-  # Default route handles all custom messages
   DefaultRoute:
     Type: AWS::ApiGatewayV2::Route
     Properties:
@@ -203,7 +269,6 @@ Resources:
       AuthorizationType: NONE
       Target: !Sub "integrations/${MessageIntegration}"
 
-  # Permissions for API Gateway to invoke Lambdas
   ConnectFunctionPermission:
     Type: AWS::Lambda::Permission
     Properties:

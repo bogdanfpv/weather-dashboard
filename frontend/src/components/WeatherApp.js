@@ -13,7 +13,7 @@ import WeatherStats from "./WeatherStats";
 import NotificationPanel from "./NotificationPanel";
 
 const WEBSOCKET_URL =
-    "wss://e9z9tauxbc.execute-api.eu-north-1.amazonaws.com/Prod";
+    "wss://weather-websocket-gate.texidev.cc";
 
 const WeatherApp = () => {
     const [currentTime, setCurrentTime] = useState("");
@@ -56,7 +56,6 @@ const WeatherApp = () => {
         weatherData: liveWeatherData,
         isLoadingWeather,
         canUpdateWeather,
-        nextUpdateTime,
         clearNotifications,
         requestWeatherUpdate,
     } = useWebSocket(
@@ -179,7 +178,7 @@ const WeatherApp = () => {
         // 2. Cache is empty (!cachedWeatherData)
         // 3. WebSocket is connected
         // 4. Rate limit allows it (canUpdateWeather === true)
-        if (!isLoading && !cachedWeatherData && isConnected && canUpdateWeather === true) {
+        if (!isLoading && !cachedWeatherData && isConnected && canUpdateWeather) {
             console.log("Cache is empty and rate limit allows - requesting fresh data via WebSocket...");
             requestWeatherUpdate(currentLocation.city, currentLocation.country);
         }
@@ -262,15 +261,14 @@ const WeatherApp = () => {
         <WeekForecastPanel cachedWeatherData={cachedWeatherData} />
 
         <ControlPanel
-          isConnected={isConnected}
-          isLoadingWeather={isLoadingWeather}
-          canUpdateWeather={canUpdateWeather}
-          nextUpdateTime={nextUpdateTime}
-          clearNotifications={clearNotifications}
-          handleRefreshWeather={handleRefreshWeather}
-          lastUpdated={lastUpdated}
-          notifications={notifications}
-          isClient={isClient}
+            isConnected={isConnected}
+            isLoadingWeather={isLoadingWeather}
+            canUpdateWeather={canUpdateWeather}
+            clearNotifications={clearNotifications}
+            handleRefreshWeather={handleRefreshWeather}
+            lastUpdated={lastUpdated}
+            notifications={notifications}
+            isClient={isClient}
         />
 
         <footer className="text-center mt-8 text-blue-100 text-sm">

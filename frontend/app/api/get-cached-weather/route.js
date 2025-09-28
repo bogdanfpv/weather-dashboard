@@ -1,13 +1,9 @@
-import { Redis } from '@upstash/redis';
-
 export const runtime = 'edge';
 
 export async function GET(request) {
     try {
-        const redis = Redis.fromEnv();
         const { searchParams } = new URL(request.url);
 
-        // Get location from query parameters
         const location = searchParams.get('location');
 
         if (!location) {
@@ -24,39 +20,41 @@ export async function GET(request) {
             });
         }
 
-        // Generate the same location key format used by Lambda
         const locationKey = location.toLowerCase().replace(', ', '_');
 
-        console.log(`Fetching cached weather for location key: ${locationKey}`);
+        const cachedWeather = await fetch(`https://weather-backend-middleman.texidev.cc?latest_weather=${locationKey}`, {                         cache: "no-store",
+                            headers: {
+                                "Cache-Control": "no-cache, no-store, must-revalidate",
+                                Pragma: "no-cache",
+                            },
+                        },
+                    );
 
-        // Retrieve the weather data from Redis using location-specific keys
-        const cachedWeather = await redis.get(`latest_weather_${locationKey}`);
-        const lastUpdated = await redis.get(`last_updated_${locationKey}`);
+        if (!cachedWeather.ok) {
+                    return Response.json({
+                        success: false,
+                        message: `Failed to fetch weather data: ${cachedWeather.status}`
+                    }, { status: 500 });
+        }
 
-        if (!cachedWeather) {
-            // Return a standard 404 status that will trigger catch blocks
-            return new Response(JSON.stringify({
+        const response = await cachedWeather.json();
+        const lastUpdated = response.lastUpdated;
+
+        if (!response.success || !response.data) {
+            return Response.json({
                 success: false,
                 message: `No cached weather data available for ${location}`,
                 location: location,
                 locationKey: locationKey
-            }), {
-                status: 404,
-                headers: {
-                    'Content-Type': 'application/json',
-                    'Cache-Control': 'no-store, no-cache, must-revalidate, proxy-revalidate',
-                    'Pragma': 'no-cache',
-                    'Expires': '0'
-                }
-            });
+            }, { status: 404 });
         }
 
         console.log(`Found cached weather data for ${location}`);
 
         return Response.json({
             success: true,
-            data: cachedWeather,
-            lastUpdated: lastUpdated || new Date().toISOString(),
+            data: response.data,
+            lastUpdated: lastUpdated,
             location: location,
             locationKey: locationKey
         }, {

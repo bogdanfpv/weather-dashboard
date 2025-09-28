@@ -7,13 +7,13 @@ const ControlPanel = ({
   isConnected,
   isLoadingWeather,
   canUpdateWeather,
-  nextUpdateTime,
   clearNotifications,
   handleRefreshWeather,
   lastUpdated,
   notifications,
   isClient = false,
 }) => {
+
   return (
     <div className="bg-white/10 backdrop-blur-md rounded-2xl p-6 mt-6">
       <h2 className="text-white text-xl font-medium mb-4">
@@ -59,9 +59,7 @@ const ControlPanel = ({
               {isLoadingWeather
                 ? "Updating..."
                 : !canUpdateWeather
-                  ? nextUpdateTime
-                    ? `Available at ${new Date(nextUpdateTime * 1000).toLocaleTimeString()}`
-                    : "Updates rate limited"
+                  ? "Updates rate limited"
                   : "Update Weather"}
             </span>
           </button>

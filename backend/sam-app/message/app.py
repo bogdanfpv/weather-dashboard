@@ -3,15 +3,20 @@ import boto3
 import os
 import time
 import requests
-from datetime import datetime
+from datetime import datetime, timedelta
 from decimal import Decimal
 from urllib.parse import quote
-import requests
+from botocore.exceptions import ClientError
+import logging
+
+scheduler = boto3.client('scheduler')
+logger = logging.getLogger()
+logger.setLevel(logging.INFO)
 
 class DecimalEncoder(json.JSONEncoder):
     def default(self, obj):
         if isinstance(obj, Decimal):
-            return float(obj)  # Convert Decimal to float
+            return float(obj)
         return super(DecimalEncoder, self).default(obj)
 
 dynamodb = boto3.resource('dynamodb')
@@ -20,7 +25,10 @@ DEBUG_MODE = os.environ.get('DEBUG_MODE', 'false').lower() == 'true'
 
 RATE_LIMIT_TABLE = os.environ.get('RATE_LIMIT_TABLE', 'WeatherRateLimit')
 rate_limit_table = dynamodb.Table(RATE_LIMIT_TABLE)
-RATE_LIMIT_MINUTES = 1
+RATE_LIMIT_MINUTES = int(os.environ.get('RATE_LIMIT_MINUTES'))
+
+lambda_client = boto3.client('lambda')
+TOKEN_FUNCTION_NAME = os.environ.get('TOKEN_FUNCTION_NAME')
 
 OPENWEATHER_API_KEY = os.environ.get('OPENWEATHER_API_KEY')
 if not OPENWEATHER_API_KEY:
@@ -34,29 +42,79 @@ def get_location_key(city, country):
     """Generate a consistent key for location-based storage"""
     return f"{city.lower()}_{country.lower()}"
 
+def schedule_token_refresh(location_key):
+    try:
+        schedule_time = datetime.now() + timedelta(minutes=RATE_LIMIT_MINUTES)
+        schedule_name = f'token-refresh-{location_key}-{int(time.time())}'
+
+        TOKEN_FUNCTION_ARN = os.environ.get('TOKEN_FUNCTION_ARN')
+        SCHEDULER_ROLE_ARN = os.environ.get('SCHEDULER_ROLE_ARN')
+
+        if not TOKEN_FUNCTION_ARN or not SCHEDULER_ROLE_ARN:
+            print("TOKEN_FUNCTION_ARN or SCHEDULER_ROLE_ARN not configured, skipping scheduled refresh")
+            return False
+
+        scheduler.create_schedule(
+            Name=schedule_name,
+            ScheduleExpression=f'at({schedule_time.strftime("%Y-%m-%dT%H:%M:%S")})',
+            Target={
+                'Arn': TOKEN_FUNCTION_ARN,
+                'RoleArn': SCHEDULER_ROLE_ARN,
+                'Input': json.dumps({
+                    'action': 'refresh_token',
+                    'location_key': location_key
+                })
+            },
+            FlexibleTimeWindow={'Mode': 'OFF'}
+        )
+        print(f"Scheduled token refresh for {location_key} at {schedule_time}")
+        return True
+
+    except Exception as e:
+        print(f"Error scheduling token refresh: {str(e)}")
+        return False
+
+def broadcast_to_all_connections(apigw_client, data):
+    """Broadcast data to all connected clients"""
+    try:
+        response = table.scan()
+        connections = response.get('Items', [])
+
+        for connection in connections:
+            connection_id = connection['connectionId']
+            try:
+                apigw_client.post_to_connection(
+                    ConnectionId=connection_id,
+                    Data=json.dumps(data, cls=DecimalEncoder)
+                )
+            except apigw_client.exceptions.GoneException:
+                # Remove stale connection
+                table.delete_item(Key={'connectionId': connection_id})
+                logger.info(f"Removed stale connection: {connection_id}")
+            except Exception as e:
+                logger.warning(f"Failed to send to {connection_id}: {str(e)}")
+
+    except Exception as e:
+        logger.error(f"Error broadcasting: {str(e)}")
+
 def fetch_weather_data(city="Paris", country="FR"):
     """Fetch weather data from OpenWeatherMap API"""
     try:
-        # Current weather
         current_url = f"http://api.openweathermap.org/data/2.5/weather?q={city},{country}&appid={OPENWEATHER_API_KEY}&units=metric"
         current_response = requests.get(current_url, timeout=10)
         current_data = current_response.json()
 
-        #Watch for deprecation of One call 2.5
         if current_response.status_code != 200:
             raise Exception(f"OpenWeatherMap API error: {current_data.get('message', 'Unknown error')}")
 
-        # 5-day forecast
         forecast_url = f"http://api.openweathermap.org/data/2.5/forecast?q={city},{country}&appid={OPENWEATHER_API_KEY}&units=metric"
         forecast_response = requests.get(forecast_url, timeout=10)
         forecast_data = forecast_response.json()
 
-        # UV index (optional, requires separate API call)
         uv_url = f"http://api.openweathermap.org/data/2.5/uvi?lat={current_data['coord']['lat']}&lon={current_data['coord']['lon']}&appid={OPENWEATHER_API_KEY}"
         uv_response = requests.get(uv_url, timeout=10)
         uv_data = uv_response.json()
 
-        # Transform the data to match your frontend format
         weather_update = {
             "location": f"{current_data['name']}, {current_data['sys']['country']}",
             "date": datetime.now().strftime("%A %d %B"),
@@ -99,7 +157,6 @@ def fetch_weather_data(city="Paris", country="FR"):
             daily_data[date]["conditions"].append(item['weather'][0]['main'])
             daily_data[date]["winds"].append(item['wind']['speed'])
 
-        # Convert daily data to frontend format (next 5 days)
         for date, data in list(daily_data.items())[:5]:
             day_data = {
                 "day": date.strftime("%a"),
@@ -107,7 +164,6 @@ def fetch_weather_data(city="Paris", country="FR"):
                 "low": round(min(data["temps"])),
                 "high": round(max(data["temps"])),
                 "wind": f"{round(max(data['winds']) * 3.6)}mph",
-                "rain": "0%",  # You could calculate this
                 "icon": map_weather_icon(max(set(data["conditions"]), key=data["conditions"].count))
             }
             weather_update["daily"].append(day_data)
@@ -137,52 +193,109 @@ def lambda_handler(event, context):
     connection_id = event['requestContext']['connectionId']
 
     try:
-        # Parse the incoming message
         body = json.loads(event.get('body', '{}'))
         message_type = body.get('action', 'echo')
         message_data = body.get('data', 'Hello from WebSocket!')
 
         apigw_client = get_apigw_client(event)
 
-        if message_type == 'get_rate_limit_status':
-            city = body.get('city', 'Paris')
-            country = body.get('country', 'FR')
-            location_key = get_location_key(city, country)
-
-            last_update = get_last_update_time(location_key)
-            now = int(time.time())
-            can_update = True
-            next_update_time = None
-            if last_update and now - last_update < RATE_LIMIT_MINUTES * 60:
-                can_update = False
-                next_update_time = last_update + RATE_LIMIT_MINUTES * 60
-
-            rate_limit_data = {
-                'type': 'rate_limit_status',
-                'canUpdate': can_update,
-                'nextUpdateTime': next_update_time,
-                'timestamp': now,
-                'location': f"{city}, {country}"
-            }
-            apigw_client.post_to_connection(
-                ConnectionId=connection_id,
-                Data=json.dumps(rate_limit_data, cls=DecimalEncoder)
-            )
-            return {
-                'statusCode': 200,
-                'body': json.dumps('Rate limit status sent', cls=DecimalEncoder)
-            }
-
         if message_type == 'get_weather':
-            # Fetch weather data and broadcast to all clients
-            city = body.get('city', 'Paris')
-            country = body.get('country', 'FR')
-            return handle_weather_request(apigw_client, connection_id, city, country)
+            city = body.get('city')
+            country = body.get('country')
+            token = body.get('token')
+            request_token = body.get('requestToken', False)
+
+            if not city or not country:
+                        error_data = {
+                            'type': 'weather_error',
+                            'message': 'City and country are required for weather requests',
+                            'timestamp': int(time.time()),
+                            'location': f"{city or 'N/A'}, {country or 'N/A'}"
+                        }
+                        apigw_client.post_to_connection(
+                            ConnectionId=connection_id,
+                            Data=json.dumps(error_data, cls=DecimalEncoder)
+                        )
+                        return {
+                            'statusCode': 400,
+                            'body': json.dumps('City and country required', cls=DecimalEncoder)
+                        }
+
+                    # If requestToken is true, get token from DynamoDB instead of requiring it
+                    if request_token and not token:
+                            location_key = get_location_key(city, country)
+                            try:
+                                response = rate_limit_table.get_item(Key={'id': f'token_{location_key}'})
+                                if 'Item' in response:
+                                    item = response['Item']
+                                    if item.get('can_update', False):
+                                        token = item.get('token')
+                                    else:
+                                        # Rate limited - token exists but can't be used
+                                        denial_data = {
+                                            'type': 'weather_request_denied',
+                                            'message': f'Rate limit active for {city}, {country}',
+                                            'timestamp': int(time.time()),
+                                            'location': f"{city}, {country}",
+                                            'city': city,
+                                            'country': country
+                                        }
+                                        apigw_client.post_to_connection(
+                                            ConnectionId=connection_id,
+                                            Data=json.dumps(denial_data, cls=DecimalEncoder)
+                                        )
+                                        return {
+                                            'statusCode': 429,
+                                            'body': json.dumps('Rate limited', cls=DecimalEncoder)
+                                        }
+                                else:
+                                    # No token record exists for this location
+                                    denial_data = {
+                                        'type': 'weather_request_denied',
+                                        'message': f'No token available for {city}, {country}',
+                                        'timestamp': int(time.time()),
+                                        'location': f"{city}, {country}",
+                                        'city': city,
+                                        'country': country
+                                    }
+                                    apigw_client.post_to_connection(
+                                        ConnectionId=connection_id,
+                                        Data=json.dumps(denial_data, cls=DecimalEncoder)
+                                    )
+                                    return {
+                                        'statusCode': 403,
+                                        'body': json.dumps('No token available', cls=DecimalEncoder)
+                                    }
+
+                            except Exception as e:
+                                logger.error(f"Error getting token from DynamoDB: {str(e)}")
+                                return {
+                                    'statusCode': 500,
+                                    'body': json.dumps('Token retrieval failed', cls=DecimalEncoder)
+                                }
+
+                        # Now validate that we have a token before proceeding
+                        if not token:
+                            error_data = {
+                                'type': 'weather_error',
+                                'message': 'Token is required for weather requests',
+                                'timestamp': int(time.time()),
+                                'location': f"{city}, {country}"
+                            }
+                            apigw_client.post_to_connection(
+                                ConnectionId=connection_id,
+                                Data=json.dumps(error_data, cls=DecimalEncoder)
+                            )
+                            return {
+                                'statusCode': 400,
+                                'body': json.dumps('Token required', cls=DecimalEncoder)
+                            }
+
+                        return handle_weather_request(apigw_client, connection_id, city, country, token)
+
         elif message_type == 'broadcast':
-            # Send message to all connected clients
             return broadcast_message(apigw_client, message_data, connection_id)
         else:
-            # Echo message back to sender
             return echo_message(apigw_client, connection_id, message_data)
 
     except Exception as e:
@@ -196,81 +309,158 @@ def lambda_handler(event, context):
             'body': json.dumps(error_message, cls=DecimalEncoder)
         }
 
-def handle_weather_request(apigw_client, connection_id, city, country):
-    """Handle weather data request and broadcast to all clients"""
+def handle_weather_request(apigw_client, connection_id, city, country, token):
+    """Handle weather data request with token validation"""
     try:
         location_key = get_location_key(city, country)
 
-        # Rate limit check per location
-        last_update = get_last_update_time(location_key)
-        now = int(time.time())
-        if last_update and now - last_update < RATE_LIMIT_MINUTES * 60:
-            next_update_time = last_update + RATE_LIMIT_MINUTES * 60
-            denial_data = {
-                'type': 'weather_request_denied',
-                'message': f'Weather update request denied for {city}, {country}. Please wait before requesting again.',
-                'nextUpdateTime': next_update_time,
-                'timestamp': now,
-                'location': f"{city}, {country}"
-            }
-            apigw_client.post_to_connection(
-                ConnectionId=connection_id,
-                Data=json.dumps(denial_data, cls=DecimalEncoder)
-            )
-            return {
-                'statusCode': 429,
-                'body': json.dumps('Rate limit active', cls=DecimalEncoder)
-            }
-
-        weather_data = fetch_weather_data(city, country)
-        set_last_update_time(location_key)
-        update_redis(weather_data, location_key)
-
-        broadcast_data = {
-            'type': 'weather_update',
-            'data': weather_data,
-            'timestamp': now,
-            'requested_by': connection_id,
-            'location': f"{city}, {country}"
-        }
-
-        apigw_client.post_to_connection(
-            ConnectionId=connection_id,
-            Data=json.dumps(broadcast_data, cls=DecimalEncoder)
-        )
-
-        return {
-            'statusCode': 200,
-            'body': json.dumps('Weather data fetched and sent', cls=DecimalEncoder)
-        }
-
-    except Exception as e:
-        print(f"Error handling weather request: {str(e)}")
-        # Send error message back to requester
-        try:
-            error_message = str(e) if DEBUG_MODE else "An error occurred processing your request"
+        if not token:
+            # Send error back to worker, not directly to client
             error_data = {
                 'type': 'weather_error',
-                'message': f'Failed to fetch weather data for {city}, {country}: {error_message}',
+                'message': 'No token available for weather requests',
                 'timestamp': int(time.time()),
-                'location': f"{city}, {country}"
+                'location': f"{city}, {country}",
+                'clientId': connection_id  # Worker needs this to route to correct client
             }
             apigw_client.post_to_connection(
                 ConnectionId=connection_id,
                 Data=json.dumps(error_data, cls=DecimalEncoder)
             )
-        except Exception as inner_e:
-            print(f"Error sending error message: {str(inner_e)}")
+            return {
+                'statusCode': 400,
+                'body': json.dumps('No token available', cls=DecimalEncoder)
+            }
 
+        # Validate and consume token atomically
+        is_valid, message = validate_and_consume_token(location_key, token)
+
+        if not is_valid:
+            # Send denial back to worker
+            denial_data = {
+                'type': 'weather_request_denied',
+                'message': f'Weather update request denied for {city}, {country}. {message}',
+                'timestamp': int(time.time()),
+                'location': f"{city}, {country}",
+                'city': city,
+                'country': country,
+                'clientId': connection_id  # Worker needs this for routing
+            }
+            apigw_client.post_to_connection(
+                ConnectionId=connection_id,
+                Data=json.dumps(denial_data, cls=DecimalEncoder)
+            )
+
+            # Immediately update Redis to reflect consumed token
+            update_redis_can_update(location_key, False)
+
+            # Broadcast token unavailable status
+            broadcast_token_status(location_key, False)
+
+            return {
+                'statusCode': 403,
+                'body': json.dumps(f'Token validation failed: {message}', cls=DecimalEncoder)
+            }
+
+        # Fetch weather data
+        weather_data = fetch_weather_data(city, country)
+        weather_data['last_updated'] = datetime.now().isoformat()
+
+        # Update Redis with weather data and token status
+        update_redis_weather(weather_data, location_key)
+        update_redis_can_update(location_key, False)
+
+        # Schedule token refresh
+        schedule_token_refresh(location_key)
+
+        # Send weather update to worker for distribution
+        broadcast_data = {
+            'type': 'weather_update',
+            'data': weather_data,
+            'timestamp': int(time.time()),
+            'location': f"{city}, {country}",
+            'city': city,
+            'country': country,
+            'clientId': connection_id,  # For routing back to requesting client
+            'broadcast_to_all': True    # Also broadcast to all interested clients
+        }
+
+        # Send to worker (not directly to clients)
+        apigw_client.post_to_connection(
+            ConnectionId=connection_id,
+            Data=json.dumps(broadcast_data, cls=DecimalEncoder)
+        )
+
+        # Broadcast token unavailable status
+        broadcast_token_status(location_key, False)
+
+        return {
+            'statusCode': 200,
+            'body': json.dumps('Weather data fetched and sent to worker', cls=DecimalEncoder)
+        }
+
+    except Exception as e:
+        logger.error(f"Error handling weather request: {str(e)}")
+        error_data = {
+            'type': 'weather_error',
+            'message': f'Failed to fetch weather data for {city}, {country}',
+            'timestamp': int(time.time()),
+            'location': f"{city}, {country}",
+            'city': city,
+            'country': country,
+            'clientId': connection_id
+        }
+        apigw_client.post_to_connection(
+            ConnectionId=connection_id,
+            Data=json.dumps(error_data, cls=DecimalEncoder)
+        )
         return {
             'statusCode': 500,
             'body': json.dumps('Weather request failed', cls=DecimalEncoder)
         }
 
+def broadcast_token_status(location_key, is_available):
+    """Send token status to worker via WebSocket API Gateway, not directly to clients"""
+    try:
+        # Parse location key back to city and country
+        parts = location_key.split('_')
+        if len(parts) >= 2:
+            city = parts[0].title()
+            country = parts[1].upper()
+
+            # Create message for worker to distribute
+            status_data = {
+                'type': 'token_available' if is_available else 'token_unavailable',
+                'city': city,
+                'country': country,
+                'location': f"{city}, {country}",
+                'timestamp': int(time.time()),
+                'broadcast_to_all': True  # Tell worker to broadcast to all relevant clients
+            }
+
+            # Send through WebSocket API Gateway - worker will receive this
+            # Get all active WebSocket connections (these are worker connections)
+            response = table.scan()
+            connections = response.get('Items', [])
+
+            for connection in connections:
+                connection_id = connection['connectionId']
+                try:
+                    apigw_client.post_to_connection(
+                        ConnectionId=connection_id,
+                        Data=json.dumps(status_data, cls=DecimalEncoder)
+                    )
+                    logger.info(f"Sent token status to worker connection: {connection_id}")
+                except Exception as e:
+                    logger.warning(f"Failed to notify worker connection {connection_id}: {str(e)}")
+
+    except Exception as e:
+        logger.error(f"Error broadcasting token status: {str(e)}")
+
+
 def broadcast_message(apigw_client, message, sender_id):
     """Send message to all connected clients"""
     try:
-        # Get all connections from DynamoDB
         response = table.scan()
         connections = response.get('Items', [])
 
@@ -281,7 +471,6 @@ def broadcast_message(apigw_client, message, sender_id):
             'timestamp': int(time.time())
         }
 
-        # Send to all connections
         for connection in connections:
             connection_id = connection['connectionId']
             try:
@@ -290,7 +479,6 @@ def broadcast_message(apigw_client, message, sender_id):
                     Data=json.dumps(broadcast_data, cls=DecimalEncoder)
                 )
             except apigw_client.exceptions.GoneException:
-                # Connection is stale, remove it
                 print(f"Removing stale connection: {connection_id}")
                 table.delete_item(Key={'connectionId': connection_id})
 
@@ -302,22 +490,6 @@ def broadcast_message(apigw_client, message, sender_id):
     except Exception as e:
         print(f"Error broadcasting message: {str(e)}")
         raise
-
-def get_last_update_time(location_key):
-    """Get the last update time for a specific location"""
-    try:
-        response = rate_limit_table.get_item(Key={'id': f'last_update_{location_key}'})
-        return response['Item']['timestamp']
-    except KeyError:
-        return None
-
-def set_last_update_time(location_key):
-    """Set the last update time for a specific location"""
-    rate_limit_table.put_item(Item={
-        'id': f'last_update_{location_key}',
-        'timestamp': int(time.time()),
-        'location': location_key
-    })
 
 def echo_message(apigw_client, connection_id, message_data):
     """Echo message back to sender"""
@@ -349,10 +521,9 @@ def echo_message(apigw_client, connection_id, message_data):
             'body': json.dumps(error_message, cls=DecimalEncoder)
         }
 
-def update_redis(weather_data, location_key):
+def update_redis_weather(weather_data, location_key):
     """Update Upstash Redis with the latest weather data for a specific location"""
     try:
-        # Get Redis credentials from environment variables
         redis_url = os.environ.get('UPSTASH_REDIS_REST_URL')
         redis_token = os.environ.get('UPSTASH_REDIS_REST_TOKEN')
 
@@ -360,15 +531,13 @@ def update_redis(weather_data, location_key):
             print("Redis credentials not configured, skipping Redis update")
             return False
 
-        # Prepare headers for Upstash REST API
         headers = {
             "Authorization": f"Bearer {redis_token}",
             "Content-Type": "application/json"
         }
 
         print(f"Updating Redis at URL: {redis_url} for location: {location_key}")
-
-        # Store weather data for specific location using proper Upstash REST API format
+	
         weather_payload = ["SET", f"latest_weather_{location_key}", json.dumps(weather_data)]
         weather_response = requests.post(
             redis_url,
@@ -377,28 +546,102 @@ def update_redis(weather_data, location_key):
             timeout=10
         )
 
-        # Store last updated timestamp for specific location using proper Upstash REST API format
-        timestamp = datetime.now().isoformat()
-        timestamp_payload = ["SET", f"last_updated_{location_key}", timestamp]
-        timestamp_response = requests.post(
-            redis_url,
-            headers=headers,
-            json=timestamp_payload,
-            timeout=10
-        )
-
-        print(f"Redis update responses for {location_key} - Weather: {weather_response.status_code}, Data: {weather_response.text}")
-        print(f"Redis timestamp responses for {location_key} - Status: {timestamp_response.status_code}, Data: {timestamp_response.text}")
-
-        if weather_response.status_code == 200 and timestamp_response.status_code == 200:
-            print(f"Successfully updated Redis with weather data and timestamp for {location_key}")
+        if weather_response.status_code == 200:
+            print(f"Successfully updated Redis with weather data for {location_key}")
             return True
         else:
-            print(f"Failed to update Redis for {location_key} - Weather: {weather_response.text}, Timestamp: {timestamp_response.text}")
+            print(f"Failed to update Redis for {location_key}")
             return False
 
     except Exception as e:
         print(f"Error updating Redis for {location_key}: {str(e)}")
-        import traceback
-        print(traceback.format_exc())
         return False
+
+def update_redis_can_update(location_key, can_update):
+    """Update Redis with can_update status for a location"""
+    try:
+        redis_url = os.environ.get('UPSTASH_REDIS_REST_URL')
+        redis_token = os.environ.get('UPSTASH_REDIS_REST_TOKEN')
+
+        if not redis_url or not redis_token:
+            print("Redis credentials not configured, skipping Redis update")
+            return False
+
+        headers = {
+            "Authorization": f"Bearer {redis_token}",
+            "Content-Type": "application/json"
+        }
+
+        # Get current token data from Redis and update can_update field
+        get_payload = ["GET", f"token_{location_key}"]
+        get_response = requests.post(
+            redis_url,
+            headers=headers,
+            json=get_payload,
+            timeout=10
+        )
+
+        if get_response.status_code == 200:
+            result = get_response.json().get('result')
+            if result:
+                token_data = json.loads(result)
+                token_data['can_update'] = can_update
+
+                set_payload = ["SET", f"token_{location_key}", json.dumps(token_data)]
+                set_response = requests.post(
+                    redis_url,
+                    headers=headers,
+                    json=set_payload,
+                    timeout=10
+                )
+
+                if set_response.status_code == 200:
+                    print(f"Successfully updated Redis can_update status for {location_key}")
+                    return True
+
+        print(f"Failed to update Redis can_update status for {location_key}")
+        return False
+
+    except Exception as e:
+        print(f"Error updating Redis can_update status: {str(e)}")
+        return False
+
+def validate_and_consume_token(location_key, provided_token):
+    try:
+        response = rate_limit_table.update_item(
+            Key={'id': f'token_{location_key}'},
+            UpdateExpression='SET can_update = :false',
+            ConditionExpression='attribute_exists(id) AND #token = :token AND can_update = :true',
+            ExpressionAttributeNames={'#token': 'token'},
+            ExpressionAttributeValues={
+                ':token': provided_token,
+                ':true': True,
+                ':false': False
+            },
+            ReturnValues='ALL_OLD'
+        )
+        return True, "Token consumed successfully"
+    except ClientError as e:
+        if e.response['Error']['Code'] == 'ConditionalCheckFailedException':
+            return False, "Invalid token or already used"
+        raise
+
+def refresh_location_token(location_key, event=None):
+    """Refresh token for a specific location and broadcast availability via worker"""
+    generate_and_store_token(location_key, can_update=True)
+    logger.info(f"Token refreshed and can_update set to True for {location_key}")
+
+    # Update Redis immediately
+    update_redis_can_update(location_key, True)
+
+    # Broadcast token availability through worker
+    broadcast_token_status(location_key, True)
+
+    # Clean up the schedule if present
+    if event and event.get('schedule_name'):
+        try:
+            scheduler = boto3.client('scheduler')
+            scheduler.delete_schedule(Name=event['schedule_name'])
+            logger.info(f"Deleted EventBridge schedule: {event['schedule_name']}")
+        except Exception as e:
+            logger.warning(f"Failed to delete schedule: {str(e)}")

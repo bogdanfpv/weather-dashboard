@@ -9,9 +9,7 @@ export function useWeatherCache(location) {
     useEffect(() => {
         setCachedWeatherData(null);
         setIsDataReady(false);
-
-        // Use default location if none provided
-        const locationToFetch = location || "Paris, FR";
+        const locationToFetch = location;
 
         setIsLoading(true);
 
@@ -55,7 +53,7 @@ export function useWeatherCache(location) {
     }, [location]);
 
     useEffect(() => {
-        const locationToFetch = location || "Paris, FR";
+        const locationToFetch = location;
 
         const interval = setInterval(
             async () => {
@@ -65,6 +63,7 @@ export function useWeatherCache(location) {
                         {
                             cache: "no-store",
                             headers: {
+
                                 "Cache-Control": "no-cache, no-store, must-revalidate",
                                 Pragma: "no-cache",
                             },
