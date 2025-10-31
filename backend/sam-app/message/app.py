@@ -294,7 +294,7 @@ def lambda_handler(event, context):
                                 'body': json.dumps('Token required', cls=DecimalEncoder)
                             }
 
-                        return handle_weather_request(apigw_client, connection_id, city, country, token)
+                        return handle_weather_request(apigw_client, connection_id, city, country, token, client_id)
 
         elif message_type == 'broadcast':
             return broadcast_message(apigw_client, message_data, connection_id)
@@ -312,7 +312,7 @@ def lambda_handler(event, context):
             'body': json.dumps(error_message, cls=DecimalEncoder)
         }
 
-def handle_weather_request(apigw_client, connection_id, city, country, token):
+def handle_weather_request(apigw_client, connection_id, city, country, token, client_id):
     """Handle weather data request with token validation"""
     try:
         location_key = get_location_key(city, country)
@@ -324,7 +324,7 @@ def handle_weather_request(apigw_client, connection_id, city, country, token):
                 'message': 'No token available for weather requests',
                 'timestamp': int(time.time()),
                 'location': f"{city}, {country}",
-                'clientId': connection_id  # Worker needs this to route to correct client
+                'clientId': client_id  # Worker needs this to route to correct client
             }
             apigw_client.post_to_connection(
                 ConnectionId=connection_id,
@@ -347,7 +347,7 @@ def handle_weather_request(apigw_client, connection_id, city, country, token):
                 'location': f"{city}, {country}",
                 'city': city,
                 'country': country,
-                'clientId': connection_id  # Worker needs this for routing
+                'clientId': client_id  # Worker needs this for routing
             }
             apigw_client.post_to_connection(
                 ConnectionId=connection_id,
@@ -411,7 +411,7 @@ def handle_weather_request(apigw_client, connection_id, city, country, token):
             'location': f"{city}, {country}",
             'city': city,
             'country': country,
-            'clientId': connection_id
+            'clientId': client_id
         }
         apigw_client.post_to_connection(
             ConnectionId=connection_id,
