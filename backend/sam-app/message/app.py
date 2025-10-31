@@ -384,7 +384,7 @@ def handle_weather_request(apigw_client, connection_id, city, country, token):
             'location': f"{city}, {country}",
             'city': city,
             'country': country,
-            'clientId': connection_id,  # For routing back to requesting client
+            'clientId': client_id,  # For routing back to requesting client
             'broadcast_to_all': True    # Also broadcast to all interested clients
         }
 
