@@ -283,7 +283,8 @@ def lambda_handler(event, context):
                                 'type': 'weather_error',
                                 'message': 'Token is required for weather requests',
                                 'timestamp': int(time.time()),
-                                'location': f"{city}, {country}"
+                                'location': f"{city}, {country}",
+                                'clientId': client_id
                             }
                             apigw_client.post_to_connection(
                                 ConnectionId=connection_id,
@@ -358,7 +359,7 @@ def handle_weather_request(apigw_client, connection_id, city, country, token, cl
             update_redis_can_update(location_key, False)
 
             # Broadcast token unavailable status
-            broadcast_token_status(location_key, False)
+            broadcast_token_status(apigw_client, location_key, False)
 
             return {
                 'statusCode': 403,
@@ -395,7 +396,7 @@ def handle_weather_request(apigw_client, connection_id, city, country, token, cl
         )
 
         # Broadcast token unavailable status
-        broadcast_token_status(location_key, False)
+        broadcast_token_status(apigw_client, location_key, False)
 
         return {
             'statusCode': 200,
@@ -422,7 +423,7 @@ def handle_weather_request(apigw_client, connection_id, city, country, token, cl
             'body': json.dumps('Weather request failed', cls=DecimalEncoder)
         }
 
-def broadcast_token_status(location_key, is_available):
+def broadcast_token_status(apigw_client, location_key, is_available):
     """Send token status to worker via WebSocket API Gateway, not directly to clients"""
     try:
         # Parse location key back to city and country
@@ -636,9 +637,6 @@ def refresh_location_token(location_key, event=None):
 
     # Update Redis immediately
     update_redis_can_update(location_key, True)
-
-    # Broadcast token availability through worker
-    broadcast_token_status(location_key, True)
 
     # Clean up the schedule if present
     if event and event.get('schedule_name'):
