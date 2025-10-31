@@ -20,7 +20,7 @@ const WeatherApp = () => {
     const [isClient, setIsClient] = useState(false);
     const [isSidebarOpen, setIsSidebarOpen] = useState(false);
     const [isLocationDropdownOpen, setIsLocationDropdownOpen] = useState(false);
-    const [selectedLocation, setSelectedLocation] = useState("");
+    const [selectedLocation, setSelectedLocation] = useState("Paris, FR");
 
     // Set isClient to true after component mounts
     useEffect(() => {
