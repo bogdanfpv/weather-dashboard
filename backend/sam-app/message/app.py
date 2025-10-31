@@ -196,6 +196,7 @@ def lambda_handler(event, context):
         body = json.loads(event.get('body', '{}'))
         message_type = body.get('action', 'echo')
         message_data = body.get('data', 'Hello from WebSocket!')
+        client_id = body.get('clientId')
 
         apigw_client = get_apigw_client(event)
 
@@ -238,7 +239,8 @@ def lambda_handler(event, context):
                                             'timestamp': int(time.time()),
                                             'location': f"{city}, {country}",
                                             'city': city,
-                                            'country': country
+                                            'country': country,
+                                            'clientId': client_id
                                         }
                                         apigw_client.post_to_connection(
                                             ConnectionId=connection_id,
@@ -256,7 +258,8 @@ def lambda_handler(event, context):
                                         'timestamp': int(time.time()),
                                         'location': f"{city}, {country}",
                                         'city': city,
-                                        'country': country
+                                        'country': country,
+                                        'clientId': client_id
                                     }
                                     apigw_client.post_to_connection(
                                         ConnectionId=connection_id,
