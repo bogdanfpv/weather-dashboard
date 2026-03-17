@@ -1,0 +1,302 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+
+Parameters:
+  OpenWeatherMapApiKey:
+    Type: String
+    Description: OpenWeatherMap API key for weather data
+    NoEcho: true
+  UpstashRedisUrl:
+    Type: String
+    Description: Upstash Redis REST API URL
+  UpstashRedisToken:  
+      Type: String
+      Description: Upstash Redis REST API Token
+      NoEcho: true
+
+Globals:
+  Function:
+    Timeout: 30
+    MemorySize: 128
+    Runtime: python3.13
+    Environment:
+      Variables:
+        CONNECTIONS_TABLE: !Ref ConnectionsTable
+        RATE_LIMIT_TABLE: !Ref RateLimitTable
+        DEBUG_MODE: 'true'
+        UPSTASH_REDIS_REST_URL: !Ref UpstashRedisUrl
+        UPSTASH_REDIS_REST_TOKEN: !Ref UpstashRedisToken
+        OPENWEATHER_API_KEY: !Ref OpenWeatherMapApiKey
+        WEBSOCKET_API_ENDPOINT: !Sub '{{resolve:secretsmanager:prod/openweathermap/WEBSOCKET_API_ENDPOINT}}'
+        DEFAULT_CITIES: 'Paris,FR|London,GB|Tokyo,JP|Sydney,AU|Washington,US|Helsinki,FI|Mumbai,IN|Dubai,AE'
+        RATE_LIMIT_MINUTES: '60'
+
+Resources:
+  ConnectionsTable:
+    Type: AWS::DynamoDB::Table
+    DeletionPolicy: Delete
+    Properties:
+      AttributeDefinitions:
+        - AttributeName: connectionId
+          AttributeType: S
+      KeySchema:
+        - AttributeName: connectionId
+          KeyType: HASH
+      BillingMode: PAY_PER_REQUEST
+      TimeToLiveSpecification:
+        AttributeName: ttl
+        Enabled: true
+
+  RateLimitTable:
+    Type: AWS::DynamoDB::Table
+    DeletionPolicy: Delete
+    Properties:
+      AttributeDefinitions:
+        - AttributeName: id
+          AttributeType: S
+      KeySchema:
+        - AttributeName: id
+          KeyType: HASH
+      BillingMode: PAY_PER_REQUEST
+
+  WeatherWebSocketApi:
+    Type: AWS::ApiGatewayV2::Api
+    Properties:
+      Name: WeatherWebSocketApi
+      ProtocolType: WEBSOCKET
+      RouteSelectionExpression: "$request.body.action"
+
+  TokenFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: token/
+      Handler: app.lambda_handler
+      Timeout: 60
+      Environment:
+        Variables:
+          CONNECTIONS_TABLE: !Ref ConnectionsTable
+          RATE_LIMIT_TABLE: !Ref RateLimitTable
+          OPENWEATHER_API_KEY: !Ref OpenWeatherMapApiKey
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref ConnectionsTable
+        - DynamoDBCrudPolicy:
+            TableName: !Ref RateLimitTable
+
+  ConnectFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: connect/
+      Handler: app.lambda_handler
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref ConnectionsTable
+        - Statement:
+            - Effect: Allow
+              Action:
+                - execute-api:ManageConnections
+              Resource: !Sub "arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${WeatherWebSocketApi}/*"
+
+  WeatherUpdateFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: weather-update/
+      Handler: app.lambda_handler
+      Timeout: 60
+      Policies:
+        - Statement:
+            - Effect: Allow
+              Action:
+                - logs:CreateLogGroup
+                - logs:CreateLogStream
+                - logs:PutLogEvents
+              Resource: "*"
+      Events:
+        ScheduledWeatherUpdate:
+          Type: Schedule
+          Properties:
+            Schedule: rate(6 hours)
+
+  DisconnectFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: disconnect/
+      Handler: app.lambda_handler
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref ConnectionsTable
+
+  MessageFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: message/
+      Handler: app.lambda_handler
+      Environment:
+        Variables:
+          OPENWEATHER_API_KEY: !Ref OpenWeatherMapApiKey
+          TOKEN_FUNCTION_NAME: !Ref TokenFunction
+          TOKEN_FUNCTION_ARN: !GetAtt TokenFunction.Arn
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref ConnectionsTable
+        - DynamoDBCrudPolicy:
+            TableName: !Ref RateLimitTable
+        - Statement:
+            - Effect: Allow
+              Action:
+                - execute-api:ManageConnections
+              Resource: !Sub "arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${WeatherWebSocketApi}/*"
+        - Statement:
+            - Effect: Allow
+              Action:
+                - lambda:InvokeFunction
+              Resource: !GetAtt TokenFunction.Arn
+
+  TokenFunctionInvokePermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !Ref TokenFunction
+      Action: lambda:InvokeFunction
+      Principal: lambda.amazonaws.com
+      SourceArn: !GetAtt MessageFunction.Arn
+
+  BroadcastFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: broadcast/
+      Handler: app.lambda_handler
+      Environment:
+        Variables:
+          WEBSOCKET_API_ENDPOINT: !Sub "${WeatherWebSocketApi}.execute-api.${AWS::Region}.amazonaws.com/Prod"
+      Policies:
+        - DynamoDBReadPolicy:
+            TableName: !Ref ConnectionsTable
+        - Statement:
+            - Effect: Allow
+              Action:
+                - execute-api:ManageConnections
+              Resource: !Sub "arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${WeatherWebSocketApi}/*"
+
+  ScheduledWeatherFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: scheduled-weather/
+      Handler: app.lambda_handler
+      Environment:
+        Variables:
+          TOKEN_FUNCTION_ARN: !GetAtt TokenFunction.Arn
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref RateLimitTable
+        - Statement:
+            - Effect: Allow
+              Action:
+                - lambda:InvokeFunction
+              Resource: !GetAtt TokenFunction.Arn
+      Events:
+        ScheduledWeatherUpdate:
+          Type: Schedule
+          Properties:
+            Schedule: rate(60 minutes)
+
+  TokenInitializer:
+    Type: Custom::TokenInitializer
+    DependsOn:
+      - RateLimitTable
+    Properties:
+      ServiceToken: !GetAtt TokenFunction.Arn
+      Trigger: !Ref AWS::StackName
+
+  WebSocketDeployment:
+    Type: AWS::ApiGatewayV2::Deployment
+    DependsOn:
+      - ConnectRoute
+      - DisconnectRoute
+      - DefaultRoute
+    Properties:
+      ApiId: !Ref WeatherWebSocketApi
+
+  WebSocketStage:
+    Type: AWS::ApiGatewayV2::Stage
+    Properties:
+      ApiId: !Ref WeatherWebSocketApi
+      DeploymentId: !Ref WebSocketDeployment
+      StageName: Prod
+
+  ConnectIntegration:
+    Type: AWS::ApiGatewayV2::Integration
+    Properties:
+      ApiId: !Ref WeatherWebSocketApi
+      IntegrationType: AWS_PROXY
+      IntegrationUri: !Sub "arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${ConnectFunction.Arn}/invocations"
+
+  DisconnectIntegration:
+    Type: AWS::ApiGatewayV2::Integration
+    Properties:
+      ApiId: !Ref WeatherWebSocketApi
+      IntegrationType: AWS_PROXY
+      IntegrationUri: !Sub "arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${DisconnectFunction.Arn}/invocations"
+
+  MessageIntegration:
+    Type: AWS::ApiGatewayV2::Integration
+    Properties:
+      ApiId: !Ref WeatherWebSocketApi
+      IntegrationType: AWS_PROXY
+      IntegrationUri: !Sub "arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${MessageFunction.Arn}/invocations"
+
+  ConnectRoute:
+    Type: AWS::ApiGatewayV2::Route
+    Properties:
+      ApiId: !Ref WeatherWebSocketApi
+      RouteKey: $connect
+      AuthorizationType: NONE
+      Target: !Sub "integrations/${ConnectIntegration}"
+
+  DisconnectRoute:
+    Type: AWS::ApiGatewayV2::Route
+    Properties:
+      ApiId: !Ref WeatherWebSocketApi
+      RouteKey: $disconnect
+      AuthorizationType: NONE
+      Target: !Sub "integrations/${DisconnectIntegration}"
+
+  DefaultRoute:
+    Type: AWS::ApiGatewayV2::Route
+    Properties:
+      ApiId: !Ref WeatherWebSocketApi
+      RouteKey: $default
+      AuthorizationType: NONE
+      Target: !Sub "integrations/${MessageIntegration}"
+
+  ConnectFunctionPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      Action: lambda:InvokeFunction
+      FunctionName: !Ref ConnectFunction
+      Principal: apigateway.amazonaws.com
+      SourceArn: !Sub "arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${WeatherWebSocketApi}/*"
+
+  DisconnectFunctionPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      Action: lambda:InvokeFunction
+      FunctionName: !Ref DisconnectFunction
+      Principal: apigateway.amazonaws.com
+      SourceArn: !Sub "arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${WeatherWebSocketApi}/*"
+
+  MessageFunctionPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      Action: lambda:InvokeFunction
+      FunctionName: !Ref MessageFunction
+      Principal: apigateway.amazonaws.com
+      SourceArn: !Sub "arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${WeatherWebSocketApi}/*"
+
+Outputs:
+  WebSocketURI:
+    Description: "WebSocket URI for connecting from frontend"
+    Value: !Sub "wss://${WeatherWebSocketApi}.execute-api.${AWS::Region}.amazonaws.com/Prod"
+
+  BroadcastFunctionArn:
+    Description: "ARN of broadcast function for triggering from other services"
+    Value: !GetAtt BroadcastFunction.Arn

@@ -1,0 +1,68 @@
+name: Deploy SAM Backend
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'backend/**'
+      - '.github/workflows/backend-tests.yml'
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend/sam-app
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+
+      - name: Set up SAM CLI
+        uses: aws-actions/setup-sam@v2
+        with:
+          use-installer: true
+
+      - name: Install test dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r tests/requirements-dev.txt
+
+      - name: Build SAM application
+        run: sam build
+
+      - name: Run unit tests
+        run: python -m pytest tests/unit/ -v --tb=short
+
+  deploy:
+    needs: test
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend/sam-app
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+
+      - name: Install AWS SAM CLI
+        run: pip install aws-sam-cli
+
+      - name: Validate SAM template
+        run: sam validate --config-file samconfig.toml
+
+      - name: Build SAM app
+        run: sam build --config-file samconfig.toml
+
+      - name: Deploy to AWS
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          AWS_DEFAULT_REGION: eu-north-1
+        run: sam deploy --no-confirm-changeset --no-fail-on-empty-changeset --config-file samconfig.toml --stack-name hello-world-app-v2 --capabilities CAPABILITY_IAM --parameter-overrides OpenWeatherMapApiKey=${{ secrets.OPENWEATHER_API_KEY }} UpstashRedisUrl=${{ secrets.UPSTASH_REDIS_URL }} UpstashRedisToken=${{ secrets.UPSTASH_REDIS_TOKEN }}

@@ -1,0 +1,9 @@
+name: Run Frontend Tests (DISABLED)
+run-name: ${{ github.actor }} is running Frontend tests
+on:
+  workflow_dispatch:
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo "Tests disabled"
